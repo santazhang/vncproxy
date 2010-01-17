@@ -4,8 +4,12 @@
 #include "xstr.h"
 #include "xnet.h"
 #include "xmemory.h"
+#include "xcrypto.h"
 #include "xutils.h"
 
+#include "vnc_auth/d3des.h"
+
+// helper function for debugging
 void print_bytes(char *buf, int size) {
   int i;
   printf("Binary: ");
@@ -71,11 +75,41 @@ static void exchange_server_security_types(xsocket xs) {
 
 
 static void do_vnc_auth(xsocket xs) {
-  char challenge[16];
-  char response[16];
+  unsigned char challenge[16];
+  unsigned char response[16];
+  unsigned char key[8];
+  int i;
+  strcpy(key, "the_pwd__\0"); // the key should be padded with 0 to 8 bytes
+  // my test code
+  printf("My test code\n");
+  printf("Key:\n");
+  print_bytes(key, 8);
+  printf("input:\n");
+  rfbDesKey(key, EN0);
+  for (i = 0; i < 8; i++) {
+    challenge[i] = i;
+  }
+    rfbDes(challenge, response);
+  print_bytes(challenge, 8);
+  printf("Result:\n");
+  
+  print_bytes(response, 8);
+  
   xsocket_read(xs, challenge, 16);
   printf("Got challenge:\n");
   print_bytes(challenge, 16);
+
+  // MUST pad key with null to 8 bytes
+  rfbDesKey(key, EN0);
+  for (i = 0; i < 16; i += 8) { // every 8 bytes 1 seg
+    rfbDes(challenge + i, response + i);
+  }
+
+  printf("Prepared response:\n");
+  print_bytes(response, 16);
+  xsocket_write(xs, response, 16);
+
+
 }
 
 // the main service function
@@ -97,13 +131,20 @@ void vnc_proxy(xsocket xs) {
 
   do_vnc_auth(xs);
 
+  // TODO start forwarding
+  // use select to control multiple connection (input, output)
+
+  cnt = xsocket_read(xs, buf, buf_len);
+  printf("Got length %d bytes\n", cnt);
+  print_bytes(buf, cnt);
+
   xfree(buf);
 }
 
 int main() {
   xstr host_str = xstr_new();
   xstr_set_cstr(host_str, "localhost");
-  xsocket xs = xsocket_new(host_str, 5901);
+  xsocket xs = xsocket_new(host_str, 5902);
 
   printf("This is vnc_proxy!\n");
   printf("Connecting to %s\n", xstr_get_cstr(host_str));

@@ -134,3 +134,4 @@ xsuccess xsha1_result(xsha1 xsh, unsigned int* result);
 void xsha1_delete(xsha1 xsh);
 
 #endif // XCRYPTO_H_
+
