@@ -34,6 +34,10 @@ typedef struct xsocket_impl* xsocket;
 
   @return
     A new xsocket object. It is not 'connected' to the target address at creation time, though.
+    You can connect the xsocket by xsocket_connect().
+
+  @see
+    xsocket_connect
 */
 xsocket xsocket_new(xstr host, int port);
 
@@ -95,6 +99,16 @@ int xsocket_write(xsocket xs, const void* data, int len);
     Make sure the buffer has got enough size!
 */
 int xsocket_read(xsocket xs, void* buf, int max_len);
+
+
+/**
+  @brief
+    Connect an xsocket to server side.
+
+  @param xs
+    The xsocket to be connectted.
+*/
+void xsocket_connect(xsocket xs);
 
 /**
   @brief

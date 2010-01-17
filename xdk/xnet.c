@@ -70,6 +70,10 @@ int xsocket_read(xsocket xs, void* buf, int max_len) {
   return read(xs->sockfd, buf, max_len);
 }
 
+void xsocket_connect(xsocket xs) {
+  connect(xs->sockfd, (struct sockaddr *)&(xs->addr), sizeof(xs->addr));
+}
+
 void xsocket_delete(xsocket xs) {
   // do not use shutdown here
   // otherwise deleting xsocket in main process will also
