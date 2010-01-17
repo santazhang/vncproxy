@@ -6,6 +6,9 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/time.h>
+#include <sys/types.h>
+#include <sys/select.h>
+
 
 #include "xnet.h"
 #include "xmemory.h"
@@ -81,6 +84,68 @@ void xsocket_delete(xsocket xs) {
   close(xs->sockfd);
   xstr_delete(xs->host);
   xfree(xs);
+}
+
+void xsocket_shortcut(xsocket xs1, xsocket xs2) {
+  fd_set r_set;
+  fd_set w_set;
+  fd_set ex_set;
+
+  int maxfdp1 = 0;
+  const int buf_len = 8192;
+  char* buf = xmalloc_ty(buf_len, char);
+  int cnt;
+  int counter = 0;
+
+  FD_ZERO(&r_set);
+  FD_ZERO(&w_set);
+  FD_ZERO(&ex_set);
+
+  FD_SET(xs1->sockfd, &r_set);
+  FD_SET(xs1->sockfd, &w_set);
+  if (xs1->sockfd + 1 > maxfdp1) {
+    maxfdp1 = xs1->sockfd + 1;
+    printf("maxfdp1 = %d\n", maxfdp1);
+  }
+
+  FD_SET(xs2->sockfd, &r_set);
+  FD_SET(xs2->sockfd, &w_set);
+  if (xs2->sockfd + 1 > maxfdp1) {
+    maxfdp1 = xs2->sockfd + 1;
+    printf("maxfdp1 = %d\n", maxfdp1);
+  }
+
+  while (select(maxfdp1, &r_set, &w_set, &ex_set, NULL) >= 0)  {
+    //if (counter++ > 100)
+      //break;
+
+    if (FD_ISSET(xs1->sockfd, &r_set)) {
+      printf("r1 ");
+    }
+    if (FD_ISSET(xs2->sockfd, &r_set)) {
+      printf("r2 ");
+    }
+    if (FD_ISSET(xs1->sockfd, &w_set)) {
+      printf("w1 ");
+    }
+    if (FD_ISSET(xs2->sockfd, &w_set)) {
+      printf("w2 ");
+    }
+    printf("\n");
+    if (FD_ISSET(xs1->sockfd, &r_set) && FD_ISSET(xs2->sockfd, &w_set)) {
+      printf("[info] r1 w2\n");
+      cnt = xsocket_read(xs1, buf, buf_len);
+      printf("got data with size %d\n", cnt);
+      xsocket_write(xs2, buf, cnt);
+
+    } else if (FD_ISSET(xs2->sockfd, &r_set) && FD_ISSET(xs1->sockfd, &w_set)) {
+      printf("[info] r2 w1\n");
+      cnt = xsocket_read(xs2, buf, buf_len);
+      printf("got data with size %d\n", cnt);
+      xsocket_write(xs1, buf, cnt);
+    }
+  }
+  xfree(buf);
 }
 
 static void xserver_delete(xserver xs) {

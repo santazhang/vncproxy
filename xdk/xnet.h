@@ -119,6 +119,17 @@ void xsocket_connect(xsocket xs);
 */
 void xsocket_delete(xsocket xs);
 
+/**
+  @brief
+    Join 2 xsockets, do forwarding between them. This is a blocking call.
+
+  @param xs1
+    One of the xsockets.
+  @param xs2
+    One of the xsockets.
+*/
+void xsocket_shortcut(xsocket xs1, xsocket xs2);
+
 struct xserver_impl;
 
 /**

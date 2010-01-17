@@ -1,13 +1,22 @@
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
+#include <sys/select.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 #include "xstr.h"
 #include "xnet.h"
+#include "xhash.h"
 #include "xmemory.h"
 #include "xcrypto.h"
 #include "xutils.h"
 
 #include "vnc_auth/d3des.h"
+
+// globally shared data
+xhash vnc_mapping;
+
 
 // helper function for debugging
 void print_bytes(char *buf, int size) {
@@ -24,135 +33,235 @@ void print_bytes(char *buf, int size) {
   printf("\n");
 }
 
-// returns: 0x3003 or 0x3007 or 0x3008
-// or return -1 on failure
-static int get_server_version(xsocket xs) { char buf[12];
-  int cnt = xsocket_read(xs, buf, 12);
-  print_bytes(buf, 12);
-  if (cnt < 0) {
-    return -1;
-  } else if (xcstr_startwith_cstr(buf, "RFB 003.003") == XTRUE) {
-    return 0x3003;
-  } else if (xcstr_startwith_cstr(buf, "RFB 003.007") == XTRUE) {
-    return 0x3007;
-  } else if (xcstr_startwith_cstr(buf, "RFB 003.008") == XTRUE) {
-    return 0x3008;
-  } else {
-    return -1;
-  }
+static void vnc_proxy_acceptor2(xsocket client_xs, void* args) {
+  xstr vnc_host = xstr_new();
+  int vnc_port = 3000;
+  xsocket vnc_xs;
+
+  xstr_set_cstr(vnc_host, "166.111.131.34");
+  vnc_xs = xsocket_new(vnc_host, vnc_port);
+  xsocket_connect(vnc_xs);
+
+  xsocket_shortcut(vnc_xs, client_xs);
+
+  xsocket_delete(vnc_xs);
 }
 
-static void exchange_server_security_types(xsocket xs) {
-  char number;
-  char* buf;
-  int cnt = xsocket_read(xs, &number, 1);
+
+static void vnc_proxy_acceptor(xsocket client_xs, void* args) {
+  const int buf_len = 8192;
+  const int challenge_size = 16;
+  unsigned char* buf = xmalloc_ty(buf_len, unsigned char);
+  unsigned char* challenge = xmalloc_ty(challenge_size, unsigned char);
+  unsigned char* response = xmalloc_ty(challenge_size, unsigned char);
+  unsigned char* expected_response = xmalloc_ty(challenge_size, unsigned char);
+  int cnt;
   int i;
-  xbool has_vnc_auth = XFALSE;
-  print_bytes(&number, 1);
-  printf("Number of security options: %d\n", (int) number);
-  // if number == 0, then connection failed
-  buf = xmalloc_ty(((int) number), char);
-  xsocket_read(xs, buf, (int) number);
-  print_bytes(buf, (int) number);
-  for (i = 0; i < (int) number; i++) {
-    if (buf[i] == 0) {
-      printf("%d: invalid\n", buf[i]);
-    } else if (buf[i] == 1) {
-      printf("%d: none\n", buf[i]);
-    } else if (buf[i] == 2) {
-      printf("%d vnc auth\n", buf[i]);
-      has_vnc_auth = XTRUE;
-    } else {
-      printf("%d other\n", buf[i]);
+  xbool has_error = XFALSE;
+
+  printf("[info] got new client!\n");
+
+  // handshake on VNC version, only support 3.8
+  if (has_error == XFALSE && xsocket_write(client_xs, "RFB 003.008\n", 12) == -1) {
+    fprintf(stderr, "[error] cannot write to client\n");
+    has_error = XTRUE;
+  }
+
+  if (has_error == XFALSE && xsocket_read(client_xs, buf, 12) != 12) {
+    fprintf(stderr, "[error] cannot read from client\n");
+    has_error = XTRUE;
+  }
+
+  if (has_error == XFALSE && xcstr_startwith_cstr(buf, "RFB 003.008") == XFALSE) {
+    fprintf(stderr, "[failure] client vnc version not supported!\n");
+    has_error = XTRUE;
+  }
+
+  if (has_error == XFALSE) {
+    // tell client the security types
+    buf[0] = 1; // 1 security type
+    buf[1] = 2; // vnc auth
+    xsocket_write(client_xs, buf, 2);
+  }
+
+  if (has_error == XFALSE && xsocket_read(client_xs, buf, 1) == -1) {
+    printf("[error] cannot read from client\n");
+    has_error = XTRUE;
+  }
+
+  printf("[info] client choose security type %d\n", (int) buf[0]);
+
+  // make random challenge
+  for (i = 0; i < challenge_size; i++) {
+    challenge[i] = (unsigned char) (rand() & 0xFF);
+  }
+  xsocket_write(client_xs, challenge, challenge_size);
+  xsocket_read(client_xs, response, challenge_size);
+
+  // calculate the expected response, NOTE: key is padded by null to 8 bytes, if strlen(key) > 8, it is trimmed
+  rfbDesKey("nopass\0\0", EN0); // TODO configurable key from vnc_proxy_ctl
+  for (i = 0; i < challenge_size; i += 8) {
+    rfbDes(challenge + i, expected_response + i);
+  }
+  printf("[info] expected the following bytes:\n");
+  print_bytes(expected_response, challenge_size);
+  printf("[info] actually got the following bytes:\n");
+  print_bytes(response, challenge_size);
+
+  if (memcmp(response, expected_response, challenge_size) != 0) {
+    char* failure_message = "authentication failed";
+    printf("[info] auth failed\n");
+
+    // well, be careful about the endians
+    buf[0] = 0;
+    buf[1] = 0;
+    buf[2] = 0;
+    buf[3] = 1; // indicate failure
+    buf[4] = 0;
+    buf[5] = 0;
+    buf[6] = 0;
+    buf[7] = (unsigned char) strlen(failure_message);
+    strcpy(buf + 8, failure_message);
+    printf("[info] going to write the following error message:\n");
+    print_bytes(buf, buf[7] + 8);
+    xsocket_write(client_xs, buf, buf[7] + 8);
+    has_error = XTRUE;
+
+  } else {
+    // try to connect to real server
+    xstr vnc_host = xstr_new();
+    int vnc_port = 5901;
+    xsocket vnc_xs;
+    int auth_type_count = 0;
+    xbool has_vnc_auth = XFALSE;
+    xbool has_none_auth = XFALSE;
+
+    xstr_set_cstr(vnc_host, "localhost");
+
+    vnc_xs = xsocket_new(vnc_host, vnc_port);
+    xsocket_connect(vnc_xs);
+
+    // handshake vnc version
+    xsocket_read(vnc_xs, buf, 12);
+    xsocket_write(vnc_xs, "RFB 003.008\n", 12);
+    
+    xsocket_read(vnc_xs, buf, 1);
+    auth_type_count = buf[0];
+    printf("[info] real VNC server has %d types of auth\n", auth_type_count);
+    xsocket_read(vnc_xs, buf, auth_type_count);
+
+    for (i = 0; i < auth_type_count; i++) {
+      if (buf[i] == 1) {
+        // no auth
+        has_none_auth = XTRUE;
+      } else if (buf[i] == 2) {
+        // vnc auth
+        has_vnc_auth == XTRUE;
+      }
+    }
+
+    if (has_none_auth == XTRUE) {
+      // TODO
+
+      // tell client successful
+      xsocket_write(client_xs, "\0\0\0\0", 4);
+
+    } else if (has_vnc_auth == XTRUE) {
+      // TODO
+      buf[0] = (unsigned char) 2;
+      xsocket_write(vnc_xs, buf, 1);  // tell vnc server: use vnc auth
+      xsocket_read(vnc_xs, challenge, challenge_size);
+
+      // TODO use real key for the real vnc server
+      rfbDesKey("nopass\0\0", EN0);
+
+      for (i = 0; i < challenge_size; i += 8) {
+        rfbDes(challenge + i, response + i);
+      }
+
+      xsocket_write(vnc_xs, response, challenge_size);  // auth for the real vnc server
+      xsocket_read(vnc_xs, buf, 4);
+
+      // check success
+      if (buf[3] != 0) {
+        // TODO failure
+        printf("[info] auth failed on real vnc server\n");
+        has_error = XTRUE;
+      } else {
+        printf("[info] passed auth on real vnc server\n");
+      }
+
+      // tell client successful
+      xsocket_write(client_xs, "\0\0\0\0", 4);
+    }
+
+    if (has_error == XFALSE) {
+      // start forwarding
+      printf("[info] start forwarding...\n");
+      xsocket_shortcut(client_xs, vnc_xs);
+    }
+
+    xsocket_delete(vnc_xs);
+  }
+
+  xfree(buf);
+  xfree(challenge);
+  xfree(response);
+  xfree(expected_response);
+}
+
+static xsuccess start_vnc_proxy_server(xstr bind_addr, int port) {
+  int backlog = 10;
+  xsuccess ret;
+  xserver xs = xserver_new(bind_addr, port, backlog, vnc_proxy_acceptor2, XUNLIMITED, 'p', NULL);
+  if (xs == NULL) {
+    fprintf(stderr, "in start_vnc_proxy_server(): failed to init xserver!\n");
+    return XFAILURE;
+  }
+  printf("[info] VNC proxy server running on %s:%d\n", xstr_get_cstr(bind_addr), port);
+  ret = xserver_serve(xs);
+  xstr_delete(bind_addr);
+  return ret;
+}
+
+
+int main(int argc, char* argv[]) {
+  xstr bind_addr = xstr_new();
+  int port = 5900;
+  int i;
+
+  srand(time(NULL));
+  xstr_set_cstr(bind_addr, "0.0.0.0");
+
+  for (i = 1; i < argc; i++) {
+    if (strcmp(argv[i], "-p") == 0) {
+      if (i + 1 < argc) {
+        // TODO check if not number
+        sscanf(argv[i + 1], "%d", &port);
+      } else {
+        printf("error in cmdline args: '-p' must be followed by port number!\n");
+        exit(1);
+      }
+    } else if (xcstr_startwith_cstr(argv[i], "--port=")) {
+      // TODO check if not number
+      sscanf(argv[i] + 7, "%d", &port);
+    } else if (strcmp(argv[i], "-b") == 0) {
+      if (i + 1 < argc) {
+        // TODO check ip address format
+        xstr_set_cstr(bind_addr, argv[i + 1]);
+      } else {
+        printf("error in cmdline args: '-b' must be followed by bind address!\n");
+        exit(1);
+      }
+    } else if (xcstr_startwith_cstr(argv[i], "--bind=")) {
+      // TODO check ip address format
+      xstr_set_cstr(bind_addr, argv[i] + 7);
     }
   }
-  if (has_vnc_auth) {
-    char vnc_auth_char = (char) 2;
-    xsocket_write(xs, &vnc_auth_char, 1);
-  }
-  xfree(buf);
-}
 
+  // TODO prepare the vnc mapping hash table
+//  vnc_mapping = xhash_new();
 
-static void do_vnc_auth(xsocket xs) {
-  unsigned char challenge[16];
-  unsigned char response[16];
-  unsigned char key[8];
-  int i;
-  strcpy(key, "the_pwd__\0"); // the key should be padded with 0 to 8 bytes
-  // my test code
-  printf("My test code\n");
-  printf("Key:\n");
-  print_bytes(key, 8);
-  printf("input:\n");
-  rfbDesKey(key, EN0);
-  for (i = 0; i < 8; i++) {
-    challenge[i] = i;
-  }
-    rfbDes(challenge, response);
-  print_bytes(challenge, 8);
-  printf("Result:\n");
-  
-  print_bytes(response, 8);
-  
-  xsocket_read(xs, challenge, 16);
-  printf("Got challenge:\n");
-  print_bytes(challenge, 16);
-
-  // MUST pad key with null to 8 bytes
-  rfbDesKey(key, EN0);
-  for (i = 0; i < 16; i += 8) { // every 8 bytes 1 seg
-    rfbDes(challenge + i, response + i);
-  }
-
-  printf("Prepared response:\n");
-  print_bytes(response, 16);
-  xsocket_write(xs, response, 16);
-
-
-}
-
-// the main service function
-// xs: a connectted xsocket
-// do not delete it inside this function
-void vnc_proxy(xsocket xs) {
-  int cnt;
-  int buf_len = 8192;
-  char* buf = xmalloc_ty(buf_len, char);
-  int server_version = get_server_version(xs);
-  
-  printf("Server version: %x\n", server_version);
-
-  // only support rfb v3.8
-  strcpy(buf, "RFB 003.008\n");
-  cnt = xsocket_write(xs, buf, 12);
-
-  exchange_server_security_types(xs);
-
-  do_vnc_auth(xs);
-
-  // TODO start forwarding
-  // use select to control multiple connection (input, output)
-
-  cnt = xsocket_read(xs, buf, buf_len);
-  printf("Got length %d bytes\n", cnt);
-  print_bytes(buf, cnt);
-
-  xfree(buf);
-}
-
-int main() {
-  xstr host_str = xstr_new();
-  xstr_set_cstr(host_str, "localhost");
-  xsocket xs = xsocket_new(host_str, 5902);
-
-  printf("This is vnc_proxy!\n");
-  printf("Connecting to %s\n", xstr_get_cstr(host_str));
-
-  xsocket_connect(xs);
-  vnc_proxy(xs);
-  xsocket_delete(xs);
-
-  return xmem_usage(NULL);
+  return start_vnc_proxy_server(bind_addr, port);
 }
 
