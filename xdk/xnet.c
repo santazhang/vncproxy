@@ -66,11 +66,19 @@ int xsocket_get_port(xsocket xs) {
 }
 
 int xsocket_write(xsocket xs, const void* data, int len) {
-  return write(xs->sockfd, data, len);
+  if (len != 0) {
+    return write(xs->sockfd, data, len);
+  } else {
+    return 0;
+  }
 }
 
 int xsocket_read(xsocket xs, void* buf, int max_len) {
-  return read(xs->sockfd, buf, max_len);
+  if (max_len != 0) {
+    return read(xs->sockfd, buf, max_len);
+  } else {
+    return 0;
+  }
 }
 
 void xsocket_connect(xsocket xs) {
@@ -90,59 +98,53 @@ void xsocket_shortcut(xsocket xs1, xsocket xs2) {
   fd_set r_set;
   fd_set w_set;
   fd_set ex_set;
-
   int maxfdp1 = 0;
   const int buf_len = 8192;
   char* buf = xmalloc_ty(buf_len, char);
   int cnt;
-  int counter = 0;
 
-  FD_ZERO(&r_set);
-  FD_ZERO(&w_set);
-  FD_ZERO(&ex_set);
-
-  FD_SET(xs1->sockfd, &r_set);
-  FD_SET(xs1->sockfd, &w_set);
   if (xs1->sockfd + 1 > maxfdp1) {
     maxfdp1 = xs1->sockfd + 1;
-    printf("maxfdp1 = %d\n", maxfdp1);
   }
-
-  FD_SET(xs2->sockfd, &r_set);
-  FD_SET(xs2->sockfd, &w_set);
   if (xs2->sockfd + 1 > maxfdp1) {
     maxfdp1 = xs2->sockfd + 1;
-    printf("maxfdp1 = %d\n", maxfdp1);
   }
 
-  while (select(maxfdp1, &r_set, &w_set, &ex_set, NULL) >= 0)  {
-    //if (counter++ > 100)
-      //break;
+  for (;;) {
+    xbool has_activity = XFALSE;
+    FD_ZERO(&r_set);
+    FD_ZERO(&w_set);
+    FD_ZERO(&ex_set);
+    FD_SET(xs1->sockfd, &r_set);
+    FD_SET(xs1->sockfd, &w_set);
+    FD_SET(xs2->sockfd, &r_set);
+    FD_SET(xs2->sockfd, &w_set);
 
-    if (FD_ISSET(xs1->sockfd, &r_set)) {
-      printf("r1 ");
+    if (select(maxfdp1, &r_set, &w_set, &ex_set, NULL) == -1) {
+      break;
     }
-    if (FD_ISSET(xs2->sockfd, &r_set)) {
-      printf("r2 ");
-    }
-    if (FD_ISSET(xs1->sockfd, &w_set)) {
-      printf("w1 ");
-    }
-    if (FD_ISSET(xs2->sockfd, &w_set)) {
-      printf("w2 ");
-    }
-    printf("\n");
+
     if (FD_ISSET(xs1->sockfd, &r_set) && FD_ISSET(xs2->sockfd, &w_set)) {
-      printf("[info] r1 w2\n");
       cnt = xsocket_read(xs1, buf, buf_len);
-      printf("got data with size %d\n", cnt);
-      xsocket_write(xs2, buf, cnt);
-
-    } else if (FD_ISSET(xs2->sockfd, &r_set) && FD_ISSET(xs1->sockfd, &w_set)) {
-      printf("[info] r2 w1\n");
+      if (cnt > 0) {
+        xsocket_write(xs2, buf, cnt);
+        has_activity = XTRUE;
+      } else if (cnt < 0) {
+        break;
+      }
+    }
+    if (FD_ISSET(xs2->sockfd, &r_set) && FD_ISSET(xs1->sockfd, &w_set)) {
       cnt = xsocket_read(xs2, buf, buf_len);
-      printf("got data with size %d\n", cnt);
-      xsocket_write(xs1, buf, cnt);
+      if (cnt > 0) {
+        xsocket_write(xs1, buf, cnt);
+        has_activity = XTRUE;
+      } else if (cnt < 0) {
+        break;
+      }
+    }
+
+    if (has_activity == XFALSE) {
+      usleep(10);
     }
   }
   xfree(buf);

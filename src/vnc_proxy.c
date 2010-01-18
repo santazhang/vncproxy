@@ -35,7 +35,7 @@ void print_bytes(char *buf, int size) {
 
 static void vnc_proxy_acceptor2(xsocket client_xs, void* args) {
   xstr vnc_host = xstr_new();
-  int vnc_port = 3000;
+  int vnc_port = 5901;
   xsocket vnc_xs;
 
   xstr_set_cstr(vnc_host, "166.111.131.34");
