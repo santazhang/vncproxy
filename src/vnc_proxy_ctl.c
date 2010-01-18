@@ -1,6 +1,131 @@
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
-int main() {
+#include "xdef.h"
+#include "xutils.h"
+#include "xstr.h"
+
+xsuccess add_vnc_proxy(xstr vnc_host, int vnc_port, const char* new_passwd, const char* old_passwd) {
+  xsuccess ret = XFAILURE;
+  printf("[info] add, dest=%s:%d, new_pass=%s, old_pass=%s\n", xstr_get_cstr(vnc_host), vnc_port, new_passwd, old_passwd);
+  return ret;
+}
+
+xsuccess del_vnc_proxy_by_passwd(const char* new_passwd) {
+  xsuccess ret = XFAILURE;
+  printf("[info] del, new_pass=%s\n", new_passwd);
+  return ret;
+}
+
+xsuccess del_vnc_proxy_by_dest(xstr vnc_host, int vnc_port) {
+  xsuccess ret = XFAILURE;
+  printf("[info] del, dest=%s:%d\n", xstr_get_cstr(vnc_host), vnc_port);
+  return ret;
+}
+
+void list_vnc_proxy() {
+  printf("[todo] list vnc proxy\n");
+}
+
+int main(int argc, char* argv[]) {
+  int i;
+  xstr dest_addr = xstr_new();
+  xstr vnc_host = xstr_new();
+  int vnc_port = -1;
+  xstr new_passwd = xstr_new();
+  xstr old_passwd = xstr_new();
+  xbool ask_for_help = XFALSE;
+
+  for (i = 1; i < argc; i++) {
+    if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
+      ask_for_help = XTRUE;
+    }
+  }
+  if (argc == 1 || ask_for_help == XTRUE) {
+    printf("usage: vnc_proxy_ctl add [-p <new password>|--password=<new password>] [-op <old password>|--old-password=<old password>] -d <dest>|--dest=<dest>\n");
+    printf("       vnc_proxy_ctl del [-p <new password>|--password=<new password>] [-d <dest>|--dest=<dest>]\n");
+    printf("       vnc_proxy_ctl list\n");
+    exit(0);
+  }
+    
+  for (i = 1; i < argc; i++) {
+    if (strcmp(argv[i], "-p") == 0) {
+      if (i + 1 < argc) {
+        xstr_set_cstr(new_passwd, argv[i + 1]);
+      } else {
+        printf("error in cmdline args: '-p' must be followed by new password!\n");
+        exit(1);
+      }
+    } else if (xcstr_startwith_cstr(argv[i], "--password=")) {
+      xstr_set_cstr(new_passwd, argv[i] + 11);
+    } else if (strcmp(argv[i], "-op") == 0) {
+      if (i + 1 < argc) {
+        xstr_set_cstr(old_passwd, argv[i + 1]);
+      } else {
+        printf("error in cmdline args: '-op' must be followed by old password!\n");
+        exit(1);
+      }
+    } else if (xcstr_startwith_cstr(argv[i], "--old-password=")) {
+      xstr_set_cstr(old_passwd, argv[i] + 15);
+    } else if (strcmp(argv[i], "-d") == 0) {
+      if (i + 1 < argc) {
+        xstr_set_cstr(dest_addr, argv[i + 1]);
+      } else {
+        printf("error in cmdline args: '-d' must be followed by destination address!\n");
+      }
+    } else if (xcstr_startwith_cstr(argv[i], "--dest=")) {
+      xstr_set_cstr(dest_addr, argv[i] + 7);
+    }
+  }
+
+  if (xstr_len(dest_addr) != 0) {
+    const char* dest_cstr = xstr_get_cstr(dest_addr);
+    xbool has_dest_port = XFALSE;
+    int split_index = 0;
+    for (i = 0; dest_cstr[i] != '\0'; i++) {
+      if (dest_cstr[i] == ':') {
+        has_dest_port = XTRUE;
+        split_index = i;
+        break;
+      }
+    }
+    if (has_dest_port == XTRUE) {
+      vnc_port = atoi(dest_cstr + split_index + 1);
+      for (i = 0; i < split_index; i++) {
+        xstr_append_char(vnc_host, dest_cstr[i]);
+      }
+    } else {
+      printf("[error] dest port not given! dest addr is like 'ip:port'!\n");
+      exit(1);
+    }
+  }
+
+  if (strcmp(argv[1], "add") == 0) {
+    if (xstr_len(vnc_host) == 0) {
+      printf("[error] dest addr not given!\n");
+    } else {
+      add_vnc_proxy(vnc_host, vnc_port, xstr_get_cstr(new_passwd), xstr_get_cstr(old_passwd));
+    }
+  } else if (strcmp(argv[1], "del") == 0) {
+    if (xstr_len(vnc_host) != 0) {
+      del_vnc_proxy_by_dest(vnc_host, vnc_port);
+    } else if (xstr_len(new_passwd) != 0) {
+      del_vnc_proxy_by_passwd(xstr_get_cstr(new_passwd));
+    } else {
+      printf("[error] wrong parameters for 'del' action!\n");
+    }
+  } else if (strcmp(argv[1], "list") == 0) {
+    list_vnc_proxy();
+  } else {
+    printf("[error] unknown action '%s'\n", argv[1]);
+  }
+
+  xstr_delete(vnc_host);
+  xstr_delete(new_passwd);
+  xstr_delete(old_passwd);
+  xstr_delete(dest_addr);
+
   return 0;
 }
 
