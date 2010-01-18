@@ -98,6 +98,7 @@ void xsocket_shortcut(xsocket xs1, xsocket xs2) {
   fd_set r_set;
   fd_set w_set;
   fd_set ex_set;
+  struct timeval time_out;
   int maxfdp1 = 0;
   const int buf_len = 8192;
   char* buf = xmalloc_ty(buf_len, char);
@@ -110,41 +111,65 @@ void xsocket_shortcut(xsocket xs1, xsocket xs2) {
     maxfdp1 = xs2->sockfd + 1;
   }
 
+  time_out.tv_sec = 0;
+  time_out.tv_usec = 50 * 1000; // 50msec time out
+
   for (;;) {
-    xbool has_activity = XFALSE;
+    xbool has_activity = XFALSE;  // whether some data was sent in this round
     FD_ZERO(&r_set);
     FD_ZERO(&w_set);
     FD_ZERO(&ex_set);
     FD_SET(xs1->sockfd, &r_set);
     FD_SET(xs1->sockfd, &w_set);
-    FD_SET(xs2->sockfd, &r_set);
+    FD_SET(xs1->sockfd, &ex_set);
     FD_SET(xs2->sockfd, &w_set);
+    FD_SET(xs2->sockfd, &r_set);
+    FD_SET(xs1->sockfd, &ex_set);
 
-    if (select(maxfdp1, &r_set, &w_set, &ex_set, NULL) == -1) {
+    if (select(maxfdp1, &r_set, &w_set, &ex_set, &time_out) == -1) {
+      printf("[info] select < 0\n");
       break;
     }
 
     if (FD_ISSET(xs1->sockfd, &r_set) && FD_ISSET(xs2->sockfd, &w_set)) {
       cnt = xsocket_read(xs1, buf, buf_len);
       if (cnt > 0) {
-        xsocket_write(xs2, buf, cnt);
+        if (xsocket_write(xs2, buf, cnt) <= 0) {
+          // TODO is "<=" correct?
+          break;
+        }
         has_activity = XTRUE;
+      } else if (cnt == 0) {
+        break;  // is this correct?
       } else if (cnt < 0) {
+        printf("[info] sock cnt < 0\n");
         break;
       }
     }
     if (FD_ISSET(xs2->sockfd, &r_set) && FD_ISSET(xs1->sockfd, &w_set)) {
       cnt = xsocket_read(xs2, buf, buf_len);
       if (cnt > 0) {
-        xsocket_write(xs1, buf, cnt);
+        if (xsocket_write(xs1, buf, cnt) < 0) {
+          // TODO is "<=" correct?
+          break;
+        }
         has_activity = XTRUE;
+      } else if (cnt == 0) {
+        break;
       } else if (cnt < 0) {
+        printf("[info] sock cnt < 0\n");
         break;
       }
     }
 
+    if (FD_ISSET(xs1->sockfd, &ex_set) || FD_ISSET(xs2->sockfd, &ex_set)) {
+      printf("[info] sock ex!\n");
+      break;
+    }
+
     if (has_activity == XFALSE) {
-      usleep(10);
+      // if no data was sent, sleep for a very short time, prevent high CPU usage
+      usleep(1);
     }
   }
   xfree(buf);

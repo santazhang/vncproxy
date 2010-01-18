@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <sys/select.h>
@@ -33,21 +34,6 @@ void print_bytes(char *buf, int size) {
   printf("\n");
 }
 
-static void vnc_proxy_acceptor2(xsocket client_xs, void* args) {
-  xstr vnc_host = xstr_new();
-  int vnc_port = 5901;
-  xsocket vnc_xs;
-
-  xstr_set_cstr(vnc_host, "166.111.131.34");
-  vnc_xs = xsocket_new(vnc_host, vnc_port);
-  xsocket_connect(vnc_xs);
-
-  xsocket_shortcut(vnc_xs, client_xs);
-
-  xsocket_delete(vnc_xs);
-}
-
-
 static void vnc_proxy_acceptor(xsocket client_xs, void* args) {
   const int buf_len = 8192;
   const int challenge_size = 16;
@@ -55,8 +41,8 @@ static void vnc_proxy_acceptor(xsocket client_xs, void* args) {
   unsigned char* challenge = xmalloc_ty(challenge_size, unsigned char);
   unsigned char* response = xmalloc_ty(challenge_size, unsigned char);
   unsigned char* expected_response = xmalloc_ty(challenge_size, unsigned char);
-  int cnt;
   int i;
+  int cnt;
   xbool has_error = XFALSE;
 
   printf("[info] got new client!\n");
@@ -72,7 +58,7 @@ static void vnc_proxy_acceptor(xsocket client_xs, void* args) {
     has_error = XTRUE;
   }
 
-  if (has_error == XFALSE && xcstr_startwith_cstr(buf, "RFB 003.008") == XFALSE) {
+  if (has_error == XFALSE && xcstr_startwith_cstr((char *) buf, "RFB 003.008") == XFALSE) {
     fprintf(stderr, "[failure] client vnc version not supported!\n");
     has_error = XTRUE;
   }
@@ -99,14 +85,14 @@ static void vnc_proxy_acceptor(xsocket client_xs, void* args) {
   xsocket_read(client_xs, response, challenge_size);
 
   // calculate the expected response, NOTE: key is padded by null to 8 bytes, if strlen(key) > 8, it is trimmed
-  rfbDesKey("nopass\0\0", EN0); // TODO configurable key from vnc_proxy_ctl
+  rfbDesKey((unsigned char *) "nopass\0\0", EN0); // TODO configurable key from vnc_proxy_ctl
   for (i = 0; i < challenge_size; i += 8) {
     rfbDes(challenge + i, expected_response + i);
   }
   printf("[info] expected the following bytes:\n");
-  print_bytes(expected_response, challenge_size);
+  print_bytes((char *) expected_response, challenge_size);
   printf("[info] actually got the following bytes:\n");
-  print_bytes(response, challenge_size);
+  print_bytes((char *) response, challenge_size);
 
   if (memcmp(response, expected_response, challenge_size) != 0) {
     char* failure_message = "authentication failed";
@@ -121,9 +107,9 @@ static void vnc_proxy_acceptor(xsocket client_xs, void* args) {
     buf[5] = 0;
     buf[6] = 0;
     buf[7] = (unsigned char) strlen(failure_message);
-    strcpy(buf + 8, failure_message);
+    strcpy((char *) (buf + 8), failure_message);
     printf("[info] going to write the following error message:\n");
-    print_bytes(buf, buf[7] + 8);
+    print_bytes((char *) buf, buf[7] + 8);
     xsocket_write(client_xs, buf, buf[7] + 8);
     has_error = XTRUE;
 
@@ -136,7 +122,7 @@ static void vnc_proxy_acceptor(xsocket client_xs, void* args) {
     xbool has_vnc_auth = XFALSE;
     xbool has_none_auth = XFALSE;
 
-    xstr_set_cstr(vnc_host, "localhost");
+    xstr_set_cstr(vnc_host, "166.111.131.34");
 
     vnc_xs = xsocket_new(vnc_host, vnc_port);
     xsocket_connect(vnc_xs);
@@ -156,31 +142,28 @@ static void vnc_proxy_acceptor(xsocket client_xs, void* args) {
         has_none_auth = XTRUE;
       } else if (buf[i] == 2) {
         // vnc auth
-        has_vnc_auth == XTRUE;
+        has_vnc_auth = XTRUE;
       }
     }
 
     if (has_none_auth == XTRUE) {
-      // TODO
-
-      // tell client successful
-      xsocket_write(client_xs, "\0\0\0\0", 4);
-
+      // tell server to use none_auth
+      xsocket_write(vnc_xs, "\1", 1);
+  
     } else if (has_vnc_auth == XTRUE) {
-      // TODO
       buf[0] = (unsigned char) 2;
       xsocket_write(vnc_xs, buf, 1);  // tell vnc server: use vnc auth
       xsocket_read(vnc_xs, challenge, challenge_size);
 
       // TODO use real key for the real vnc server
-      rfbDesKey("nopass\0\0", EN0);
+      rfbDesKey((unsigned char *) "nopass\0\0", EN0);
 
       for (i = 0; i < challenge_size; i += 8) {
         rfbDes(challenge + i, response + i);
       }
 
       xsocket_write(vnc_xs, response, challenge_size);  // auth for the real vnc server
-      xsocket_read(vnc_xs, buf, 4);
+      cnt = xsocket_read(vnc_xs, buf, buf_len);
 
       // check success
       if (buf[3] != 0) {
@@ -191,14 +174,15 @@ static void vnc_proxy_acceptor(xsocket client_xs, void* args) {
         printf("[info] passed auth on real vnc server\n");
       }
 
-      // tell client successful
-      xsocket_write(client_xs, "\0\0\0\0", 4);
+      // redirect auth information to client
+      xsocket_write(client_xs, buf, cnt);
     }
 
     if (has_error == XFALSE) {
       // start forwarding
       printf("[info] start forwarding...\n");
       xsocket_shortcut(client_xs, vnc_xs);
+      printf("[info] client disconnected\n"); // TODO never reach this line?
     }
 
     xsocket_delete(vnc_xs);
@@ -213,7 +197,7 @@ static void vnc_proxy_acceptor(xsocket client_xs, void* args) {
 static xsuccess start_vnc_proxy_server(xstr bind_addr, int port) {
   int backlog = 10;
   xsuccess ret;
-  xserver xs = xserver_new(bind_addr, port, backlog, vnc_proxy_acceptor2, XUNLIMITED, 'p', NULL);
+  xserver xs = xserver_new(bind_addr, port, backlog, vnc_proxy_acceptor, XUNLIMITED, 'p', NULL);
   if (xs == NULL) {
     fprintf(stderr, "in start_vnc_proxy_server(): failed to init xserver!\n");
     return XFAILURE;
