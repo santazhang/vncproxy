@@ -182,6 +182,8 @@ static void vnc_proxy_acceptor(xsocket client_xs, void* args) {
     xbool has_vnc_auth = XFALSE;
     xbool has_none_auth = XFALSE;
 
+	printf("[info] connecting real VNC server\n");
+
     vnc_xs = xsocket_new(vnc_host, vnc_port);
     xsocket_connect(vnc_xs);
 
@@ -497,6 +499,8 @@ int main(int argc, char* argv[]) {
       xstr_set_cstr(bind_addr, argv[i] + 7);
     }
   }
+
+  printf("If you need help, use: 'vnc_proxy -h' or 'vnc_proxy --help'\n");
 
   // TODO prepare the vnc mapping hash table
   vnc_mapping = xvec_new(vnc_mapping_free);
