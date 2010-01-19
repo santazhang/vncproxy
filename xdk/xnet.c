@@ -82,10 +82,10 @@ int xsocket_read(xsocket xs, void* buf, int max_len) {
 }
 
 xsuccess xsocket_connect(xsocket xs) {
-  if (connect(xs->sockfd, (struct sockaddr *)&(xs->addr), sizeof(xs->addr))) {
-    return XSUCCESS;
-  } else {
+  if (connect(xs->sockfd, (struct sockaddr *)&(xs->addr), sizeof(xs->addr)) < 0) {
     return XFAILURE;
+  } else {
+    return XSUCCESS;
   }
 }
 
