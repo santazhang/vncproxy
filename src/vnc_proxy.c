@@ -59,9 +59,14 @@ static void vnc_proxy_acceptor(xsocket client_xs, void* args) {
   unsigned char* challenge = xmalloc_ty(challenge_size, unsigned char);
   unsigned char* response = xmalloc_ty(challenge_size, unsigned char);
   unsigned char* expected_response = xmalloc_ty(challenge_size, unsigned char);
+  unsigned char auth_key[8];
+  unsigned char real_server_auth_key[8];
   int i;
   int cnt;
   xbool has_error = XFALSE;
+  xbool proxy_auth_passed = XFALSE;
+  xstr vnc_host = xstr_new();
+  int vnc_port = 5901;
 
   printf("[info] got new client!\n");
 
@@ -105,21 +110,52 @@ static void vnc_proxy_acceptor(xsocket client_xs, void* args) {
 
   // TODO get mapping info
   pthread_mutex_lock(&vnc_mapping_mutex);
+  for (i = 0; i < xvec_size(vnc_mapping); i++) {
+    int j;
+    vnc_map* mapping = xvec_get(vnc_mapping, i);
+    const char* pwd = xstr_get_cstr(mapping->new_passwd);
+    if (xstr_len(mapping->new_passwd) == 0) {
+      // ignore proxies with empty new passwd
+      continue;
+    }
+    for (j = 0; j < 8 && j < xstr_len(mapping->new_passwd); j++) {
+      auth_key[j] = (unsigned char) pwd[j];
+    }
+    while (j < 8) {
+      auth_key[j] = '\0';
+      j++;
+    }
+    rfbDesKey(auth_key, EN0);
 
+    for (j = 0; j < challenge_size; j += 8) {
+      rfbDes(challenge + j, expected_response + j);
+    }
+
+    printf("[info] comparing for auth:\n");
+    printf("[info] client:\n");
+    print_bytes((char *) response, challenge_size);
+    printf("[info] expected:\n");
+    print_bytes((char *) expected_response, challenge_size);
+
+    if (memcmp(response, expected_response, challenge_size) == 0) {
+      const char* oldpwd = xstr_get_cstr(mapping->old_passwd);
+      proxy_auth_passed = XTRUE;
+      xstr_set_cstr(vnc_host, xstr_get_cstr(mapping->dest_host));
+      vnc_port = mapping->dest_port;
+      for (j = 0; j < 8 && j < xstr_len(mapping->old_passwd); j++) {
+        real_server_auth_key[j] = (unsigned char) oldpwd[j];
+      }
+      while (j < 8) {
+        real_server_auth_key[j] = '\0';
+        j++;
+      }
+      printf("[info] client was mapped to %s:%d\n", xstr_get_cstr(vnc_host), vnc_port);
+      break;
+    }
+  }
   pthread_mutex_unlock(&vnc_mapping_mutex);
 
-
-  // calculate the expected response, NOTE: key is padded by null to 8 bytes, if strlen(key) > 8, it is trimmed
-  rfbDesKey((unsigned char *) "nopass\0\0", EN0); // TODO configurable key from vnc_proxy_ctl
-  for (i = 0; i < challenge_size; i += 8) {
-    rfbDes(challenge + i, expected_response + i);
-  }
-  printf("[info] expected the following bytes:\n");
-  print_bytes((char *) expected_response, challenge_size);
-  printf("[info] actually got the following bytes:\n");
-  print_bytes((char *) response, challenge_size);
-
-  if (memcmp(response, expected_response, challenge_size) != 0) {
+  if (proxy_auth_passed != XTRUE) {
     char* failure_message = "authentication failed";
     printf("[info] auth failed\n");
 
@@ -138,16 +174,13 @@ static void vnc_proxy_acceptor(xsocket client_xs, void* args) {
     xsocket_write(client_xs, buf, buf[7] + 8);
     has_error = XTRUE;
 
+    xfree(vnc_host);
   } else {
     // try to connect to real server
-    xstr vnc_host = xstr_new();
-    int vnc_port = 5901;
     xsocket vnc_xs;
     int auth_type_count = 0;
     xbool has_vnc_auth = XFALSE;
     xbool has_none_auth = XFALSE;
-
-    xstr_set_cstr(vnc_host, "166.111.131.34");
 
     vnc_xs = xsocket_new(vnc_host, vnc_port);
     xsocket_connect(vnc_xs);
@@ -180,14 +213,9 @@ static void vnc_proxy_acceptor(xsocket client_xs, void* args) {
       xsocket_write(vnc_xs, buf, 1);  // tell vnc server: use vnc auth
       xsocket_read(vnc_xs, challenge, challenge_size);
 
-      // TODO use real key for the real vnc server
-      rfbDesKey((unsigned char *) "nopass\0\0", EN0);
-
-      // TODO get mapping info
-      pthread_mutex_lock(&vnc_mapping_mutex);
-
-      pthread_mutex_unlock(&vnc_mapping_mutex);
-
+      rfbDesKey(real_server_auth_key, EN0);
+      printf("[info] auth on real server with keys:\n");
+      print_bytes((char *) real_server_auth_key, 8);
 
       for (i = 0; i < challenge_size; i += 8) {
         rfbDes(challenge + i, response + i);
@@ -239,6 +267,59 @@ static xsuccess start_vnc_proxy_server(xstr bind_addr, int port) {
   return ret;
 }
 
+static void parse_vnc_mapping(char* str, vnc_map* mapping) {
+  int i;
+  if (xcstr_startwith_cstr(str, "dest_host=")) {
+    for (i = 10; str[i] != '\0' && str[i] != '\r' && str[i] != '\n'; i++) {
+      xstr_append_char(mapping->dest_host, str[i]);
+    }
+    if (str[i] != '\0') {
+      parse_vnc_mapping(str + i, mapping);  // recursive call
+    }
+  } else if (xcstr_startwith_cstr(str, "dest_port=")) {
+    xstr num_val = xstr_new();
+    for (i = 10; str[i] != '\0' && str[i] != '\r' && str[i] != '\n'; i++) {
+      xstr_append_char(num_val, str[i]);
+    }
+    mapping->dest_port = atoi(xstr_get_cstr(num_val));
+    xstr_delete(num_val);
+    if (str[i] != '\0') {
+      parse_vnc_mapping(str + i, mapping);  // recursive call
+    }
+  } else if (xcstr_startwith_cstr(str, "new_passwd=")) {
+    for (i = 11; str[i] != '\0' && str[i] != '\r' && str[i] != '\n'; i++) {
+      xstr_append_char(mapping->new_passwd, str[i]);
+    }
+    if (str[i] != '\0') {
+      parse_vnc_mapping(str + i, mapping);  // recursive call
+    }
+  } else if (xcstr_startwith_cstr(str, "old_passwd=")) {
+    for (i = 11; str[i] != '\0' && str[i] != '\r' && str[i] != '\n'; i++) {
+      xstr_append_char(mapping->old_passwd, str[i]);
+    }
+    if (str[i] != '\0') {
+      parse_vnc_mapping(str + i, mapping);  // recursive call
+    }
+  } else {
+    xbool reached_eol = XFALSE;
+    for (i = 0; str[i] != '\0'; i++) {
+      if (reached_eol == XFALSE) {
+        if (str[i] == '\r' || str[i] == '\n') {
+          reached_eol = XTRUE;
+        }
+      } else {
+        // reached_eol == XTRUE
+        if (str[i] != '\r' || str[i] != '\n') {
+          break;
+        }
+      }
+    }
+    if (str[i] != '\0') {
+      parse_vnc_mapping(str + i, mapping);  // recursive call
+    }
+  }
+}
+
 static void* ipc_server(void* args) {
   int port = *(int *) args;
   struct sockaddr_un local, remote;
@@ -288,10 +369,63 @@ static void* ipc_server(void* args) {
     cnt = recv(client_sockfd, buf, buf_len, 0);
     printf("[info] got message from client: '%s', size=%d\n", buf, cnt);
 
-    // NOTE use locks when handling vnc_mapping, if not LIST action
-    pthread_mutex_lock(&vnc_mapping_mutex);
+    strcpy(buf, "OK\r\n");
+    send(client_sockfd, buf, strlen(buf) + 1, 0);
 
-    pthread_mutex_unlock(&vnc_mapping_mutex);
+    // NOTE use locks when handling vnc_mapping, if not LIST action
+    cnt = recv(client_sockfd, buf, buf_len, 0);
+    printf("[info] got command from client: '%s', size=%d\n", buf, cnt);
+
+    if (xcstr_startwith_cstr(buf, "list") == XTRUE) {
+      // no need to lock the mapping
+      int i;
+      xstr msg = xstr_new();
+      printf("[info] below is the list of all vnc mapping\n");
+      xstr_printf(msg, "%d\n", xvec_size(vnc_mapping));
+      for (i = 0; i < xvec_size(vnc_mapping); i++) {
+        vnc_map* mapping = xvec_get(vnc_mapping, i);
+        xstr_printf(msg, "dest_host=%s\n", xstr_get_cstr(mapping->dest_host));
+        xstr_printf(msg, "dest_port=%d\n", mapping->dest_port);
+        xstr_printf(msg, "old_passwd=%s\n", xstr_get_cstr(mapping->old_passwd));
+        xstr_printf(msg, "new_passwd=%s\n", xstr_get_cstr(mapping->new_passwd));
+        xstr_printf(msg, "\n");
+      }
+      printf("%s\n", xstr_get_cstr(msg));
+      printf("[info] end of vnc listing\n");
+      send(client_sockfd, xstr_get_cstr(msg), xstr_len(msg), 0);
+
+      xstr_delete(msg);
+
+    } else {
+      pthread_mutex_lock(&vnc_mapping_mutex);
+
+      if (xcstr_startwith_cstr(buf, "add") == XTRUE) {
+
+        // TODO warning if there is alread a mapping with same new passwd (first 8 bytes)
+        vnc_map* new_mapping = xmalloc_ty(1, vnc_map);
+        new_mapping->dest_host = xstr_new();
+        new_mapping->dest_port = -1;
+        new_mapping->new_passwd = xstr_new();
+        new_mapping->old_passwd = xstr_new();
+
+        parse_vnc_mapping(buf, new_mapping);
+        if (xstr_len(new_mapping->new_passwd) == 0) {
+          printf("[warning] new password not given, this proxy mapping will be ignored!\n");
+        }
+
+        xvec_push_back(vnc_mapping, new_mapping);
+      } else if (xcstr_startwith_cstr(buf, "del.dest") == XTRUE) {
+        // TODO
+      } else if (xcstr_startwith_cstr(buf, "del.newpasswd") == XTRUE) {
+        // TODO
+      } else {
+        // failure
+        strcpy(buf, "failure: command not known\r\n");
+        send(client_sockfd, buf, strlen(buf) + 1, 0);
+      }
+
+      pthread_mutex_unlock(&vnc_mapping_mutex);
+    }
 
     printf("[info] client disconnected\n");
     close(client_sockfd);
