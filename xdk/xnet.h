@@ -107,8 +107,11 @@ int xsocket_read(xsocket xs, void* buf, int max_len);
 
   @param xs
     The xsocket to be connectted.
+
+  @return
+    Whether the connection is successful.
 */
-void xsocket_connect(xsocket xs);
+xsuccess xsocket_connect(xsocket xs);
 
 /**
   @brief

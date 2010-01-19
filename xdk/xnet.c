@@ -81,8 +81,12 @@ int xsocket_read(xsocket xs, void* buf, int max_len) {
   }
 }
 
-void xsocket_connect(xsocket xs) {
-  connect(xs->sockfd, (struct sockaddr *)&(xs->addr), sizeof(xs->addr));
+xsuccess xsocket_connect(xsocket xs) {
+  if (connect(xs->sockfd, (struct sockaddr *)&(xs->addr), sizeof(xs->addr))) {
+    return XSUCCESS;
+  } else {
+    return XFAILURE;
+  }
 }
 
 void xsocket_delete(xsocket xs) {
