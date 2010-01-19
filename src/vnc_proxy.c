@@ -198,9 +198,11 @@ static void vnc_proxy_acceptor(xsocket client_xs, void* args) {
       if (buf[i] == 1) {
         // no auth
         has_none_auth = XTRUE;
+        printf("[info] real VNC server supports none auth\n");
       } else if (buf[i] == 2) {
         // vnc auth
         has_vnc_auth = XTRUE;
+        printf("[info] real VNC server supports vnc auth\n");
       }
     }
 
@@ -432,13 +434,16 @@ static void* ipc_server(void* args) {
   }
   
   xfree(buf);
+  xfree(args);
   xstr_delete(sock_fn);
   return NULL;
 }
 
 static void start_ipc_server(int port) {
   pthread_t tid;
-  if (pthread_create(&tid, NULL, ipc_server, (void *) &port) < 0) {
+  int* port_copy = xmalloc_ty(1, int);
+  *port_copy = port;
+  if (pthread_create(&tid, NULL, ipc_server, (void *) port_copy) < 0) {
     perror("error in pthread_create()");
   }
 }
