@@ -183,25 +183,19 @@ static void vnc_proxy_acceptor(xsocket client_xs, void* args) {
     xbool has_none_auth = XFALSE;
 
     vnc_xs = xsocket_new(vnc_host, vnc_port);
-	printf("[info] connecting real VNC server %s:%d\n", xstr_get_cstr(vnc_host), vnc_port);
-	printf("[info] socket ptr is %p\n", vnc_xs);
+    printf("[info] connecting real VNC server %s:%d\n", xstr_get_cstr(vnc_host), vnc_port);
+    //printf("[info] socket ptr is %p\n", vnc_xs);
     if (xsocket_connect(vnc_xs) != XSUCCESS) {
-		printf("[info] failed to connect to real VNC server!\n");
-	} else {
-		printf("[info] connected to VNC server!\n");
-	}
+      printf("[info] failed to connect to real VNC server!\n");
+    } else {
+      printf("[info] connected to VNC server!\n");
+    }
 
     // handshake vnc version
-	printf("reading data\n");
     cnt = xsocket_read(vnc_xs, buf, 12);
-	printf("read data %d bytes:\n", cnt);
-	print_bytes((char *) buf, cnt);
-	printf("writing data\n");
     xsocket_write(vnc_xs, "RFB 003.008\n", 12);
    
-	printf("reading data\n");
     xsocket_read(vnc_xs, buf, 1);
-	print_bytes((char *) buf, 1);
     auth_type_count = buf[0];
     printf("[info] real VNC server has %d types of auth\n", auth_type_count);
     xsocket_read(vnc_xs, buf, auth_type_count);
