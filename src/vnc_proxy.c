@@ -5,19 +5,37 @@
 #include <sys/select.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <sys/un.h>
+#include <pthread.h>
 
 #include "xstr.h"
 #include "xnet.h"
-#include "xhash.h"
+#include "xvec.h"
 #include "xmemory.h"
 #include "xcrypto.h"
 #include "xutils.h"
 
 #include "vnc_auth/d3des.h"
 
-// globally shared data
-xhash vnc_mapping;
+typedef struct {
+  xstr dest_host;
+  int dest_port;
+  xstr old_passwd;
+  xstr new_passwd;
+} vnc_map;
 
+// globally shared data
+xvec vnc_mapping;
+pthread_mutex_t vnc_mapping_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+void vnc_mapping_free(void* ptr) {
+  vnc_map* map = (vnc_map *) ptr;
+
+  xstr_delete(map->dest_host);
+  xstr_delete(map->old_passwd);
+  xstr_delete(map->new_passwd);
+  xfree(map);
+}
 
 // helper function for debugging
 void print_bytes(char *buf, int size) {
@@ -83,6 +101,13 @@ static void vnc_proxy_acceptor(xsocket client_xs, void* args) {
   }
   xsocket_write(client_xs, challenge, challenge_size);
   xsocket_read(client_xs, response, challenge_size);
+
+
+  // TODO get mapping info
+  pthread_mutex_lock(&vnc_mapping_mutex);
+
+  pthread_mutex_unlock(&vnc_mapping_mutex);
+
 
   // calculate the expected response, NOTE: key is padded by null to 8 bytes, if strlen(key) > 8, it is trimmed
   rfbDesKey((unsigned char *) "nopass\0\0", EN0); // TODO configurable key from vnc_proxy_ctl
@@ -158,6 +183,12 @@ static void vnc_proxy_acceptor(xsocket client_xs, void* args) {
       // TODO use real key for the real vnc server
       rfbDesKey((unsigned char *) "nopass\0\0", EN0);
 
+      // TODO get mapping info
+      pthread_mutex_lock(&vnc_mapping_mutex);
+
+      pthread_mutex_unlock(&vnc_mapping_mutex);
+
+
       for (i = 0; i < challenge_size; i += 8) {
         rfbDes(challenge + i, response + i);
       }
@@ -208,11 +239,96 @@ static xsuccess start_vnc_proxy_server(xstr bind_addr, int port) {
   return ret;
 }
 
+static void* ipc_server(void* args) {
+  int port = *(int *) args;
+  struct sockaddr_un local, remote;
+  int sock_fd;
+  xstr sock_fn = xstr_new();
+  int len;
+  int backlog = 5;
+  int buf_len = 8192;
+  char* buf = xmalloc_ty(buf_len, char);
+  int cnt;
+
+  xstr_printf(sock_fn, "vnc_proxy.%d.sock", port);
+  if ((sock_fd = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) {
+    perror("error in opening Unix socket: ipc_server()");
+    exit(1);
+  }
+  local.sun_family = AF_UNIX;
+  strcpy(local.sun_path, xstr_get_cstr(sock_fn));
+  unlink(local.sun_path); // make sure the file will be removed when this process exit
+  len = strlen(local.sun_path) + sizeof(local.sun_family);
+  if (bind(sock_fd, (struct sockaddr *) &local, len) < 0) {
+    perror("failed to bind socket in ipc_server()");
+    exit(1);
+  }
+
+  if (listen(sock_fd, backlog) < 0) {
+    perror("failed to listen in ipc_server()");
+    exit(1);
+  }
+
+  for (;;) {
+    int client_sockfd;
+    socklen_t t = sizeof(remote);
+    printf("[info] waiting for ipc connection...\n");
+    if ((client_sockfd = accept(sock_fd, (struct sockaddr *) &remote, &t)) < 0) {
+      perror("failed to accept");
+      exit(1);
+    }
+    printf("[info] got client ipc connection!\n");
+
+    // no need to split a thread for client connection, since there won't be multiple vnc_proxy_ctl running
+
+    // TODO vnc_proxy_ctl protocal
+
+    strcpy(buf, "This is vnc_proxy\r\n");
+    send(client_sockfd, buf, strlen(buf) + 1, 0);
+    cnt = recv(client_sockfd, buf, buf_len, 0);
+    printf("[info] got message from client: '%s', size=%d\n", buf, cnt);
+
+    // NOTE use locks when handling vnc_mapping, if not LIST action
+    pthread_mutex_lock(&vnc_mapping_mutex);
+
+    pthread_mutex_unlock(&vnc_mapping_mutex);
+
+    printf("[info] client disconnected\n");
+    close(client_sockfd);
+  }
+  
+  xfree(buf);
+  xstr_delete(sock_fn);
+  return NULL;
+}
+
+static void start_ipc_server(int port) {
+  pthread_t tid;
+  if (pthread_create(&tid, NULL, ipc_server, (void *) &port) < 0) {
+    perror("error in pthread_create()");
+  }
+}
 
 int main(int argc, char* argv[]) {
   xstr bind_addr = xstr_new();
   int port = 5900;
   int i;
+  xbool ask_for_help = XFALSE;
+
+  for (i = 1; i < argc; i++) {
+    if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
+      ask_for_help = XTRUE;
+    }
+  }
+
+  if (ask_for_help) {
+    printf("usage: vnc_proxy [-b bind_addr] [-p bind_port]\n");
+    printf("       bind_addr is default to 0.0.0.0\n");
+    printf("       bind_port is default to 5900\n");
+    printf("\n");
+    printf("You need to use vnc_proxy_ctl to change proxy settings\n");
+    exit(0);
+  }
 
   srand(time(NULL));
   xstr_set_cstr(bind_addr, "0.0.0.0");
@@ -244,7 +360,10 @@ int main(int argc, char* argv[]) {
   }
 
   // TODO prepare the vnc mapping hash table
-//  vnc_mapping = xhash_new();
+  vnc_mapping = xvec_new(vnc_mapping_free);
+
+  // ipc server is started in a new thread
+  start_ipc_server(port);
 
   return start_vnc_proxy_server(bind_addr, port);
 }

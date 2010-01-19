@@ -1,14 +1,78 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <dirent.h>
+#include <unistd.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/un.h>
 
 #include "xdef.h"
+#include "xmemory.h"
 #include "xutils.h"
 #include "xstr.h"
 
+
+int connect_server() {
+  int sockfd = -1;
+  DIR* p_dir = opendir(".");
+  struct dirent* p_dirent;
+  struct stat st;
+  xstr sock_fn = xstr_new();
+  struct sockaddr_un remote;
+  int len;
+  int cnt;
+  int buf_len = 8192;
+  char* buf = xmalloc_ty(buf_len, char);
+  
+  while ((p_dirent = readdir(p_dir)) != NULL) {
+    lstat(p_dirent->d_name, &st);
+    if (S_ISSOCK(st.st_mode)) {
+      printf("[info] found socket %s\n", p_dirent->d_name);
+      if (xstr_len(sock_fn) > 0) {
+        printf("[error] multiple socket found!\n");
+        exit(1);
+      } else {
+        xstr_set_cstr(sock_fn, p_dirent->d_name);
+      }
+    }
+  }
+
+  if ((sockfd = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) {
+    perror("failed to create socket\n");
+    exit(1);
+  }
+
+  remote.sun_family = AF_UNIX;
+  strcpy(remote.sun_path, xstr_get_cstr(sock_fn));
+  len = strlen(remote.sun_path) + sizeof(remote.sun_family);
+  if (connect(sockfd, (struct sockaddr *) &remote, len) < 0) {
+    perror("failed to connect to server\n");
+    exit(1);
+  }
+
+  printf("[info] connected\n");
+
+  cnt = recv(sockfd, buf, buf_len, 0);
+  printf("[info] got message from server: '%s', size=%d\n", buf, cnt);
+
+  strcpy(buf, "This is vnc_proxy_ctl\r\n");
+  send(sockfd, buf, strlen(buf) + 1, 0);
+
+  closedir(p_dir);
+
+  xfree(buf);
+  xstr_delete(sock_fn);
+  return sockfd;
+}
+
 xsuccess add_vnc_proxy(xstr vnc_host, int vnc_port, const char* new_passwd, const char* old_passwd) {
   xsuccess ret = XFAILURE;
+  int sockfd = connect_server();
   printf("[info] add, dest=%s:%d, new_pass=%s, old_pass=%s\n", xstr_get_cstr(vnc_host), vnc_port, new_passwd, old_passwd);
+  if (sockfd > 0) {
+
+  }
   return ret;
 }
 
