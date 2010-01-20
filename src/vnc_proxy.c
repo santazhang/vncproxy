@@ -107,8 +107,6 @@ static void vnc_proxy_acceptor(xsocket client_xs, void* args) {
   xsocket_write(client_xs, challenge, challenge_size);
   xsocket_read(client_xs, response, challenge_size);
 
-
-  // TODO get mapping info
   pthread_mutex_lock(&vnc_mapping_mutex);
   for (i = 0; i < xvec_size(vnc_mapping); i++) {
     int j;
@@ -370,8 +368,6 @@ static void* ipc_server(void* args) {
 
     // no need to split a thread for client connection, since there won't be multiple vnc_proxy_ctl running
 
-    // TODO vnc_proxy_ctl protocal
-
     strcpy(buf, "This is vnc_proxy\r\n");
     send(client_sockfd, buf, strlen(buf) + 1, 0);
     cnt = recv(client_sockfd, buf, buf_len, 0);
@@ -405,27 +401,84 @@ static void* ipc_server(void* args) {
       xstr_delete(msg);
 
     } else {
+      int i;
+      vnc_map* new_mapping = xmalloc_ty(1, vnc_map);
+      new_mapping->dest_host = xstr_new();
+      new_mapping->dest_port = -1;
+      new_mapping->new_passwd = xstr_new();
+      new_mapping->old_passwd = xstr_new();
+      parse_vnc_mapping(buf, new_mapping);
+
       pthread_mutex_lock(&vnc_mapping_mutex);
 
       if (xcstr_startwith_cstr(buf, "add") == XTRUE) {
+        xstr reply_msg = xstr_new();
+        xstr_set_cstr(reply_msg, "success\r\n");
 
-        // TODO warning if there is alread a mapping with same new passwd (first 8 bytes)
-        vnc_map* new_mapping = xmalloc_ty(1, vnc_map);
-        new_mapping->dest_host = xstr_new();
-        new_mapping->dest_port = -1;
-        new_mapping->new_passwd = xstr_new();
-        new_mapping->old_passwd = xstr_new();
-
-        parse_vnc_mapping(buf, new_mapping);
         if (xstr_len(new_mapping->new_passwd) == 0) {
-          printf("[warning] new password not given, this proxy mapping will be ignored!\n");
+          xstr_set_cstr(reply_msg, "[warning] new password not given, this proxy mapping will be ignored!\r\n");
+          printf("%s", xstr_get_cstr(reply_msg));
+        } else {
+          // warn if there is alread a mapping with same new passwd (first 8 bytes)
+          for (i = 0; i < xvec_size(vnc_mapping); i++) {
+            vnc_map* mapping = xvec_get(vnc_mapping, i);
+            int j;
+            const char* new_pwd = xstr_get_cstr(new_mapping->new_passwd);
+            const char* existing_pwd = xstr_get_cstr(mapping->new_passwd);
+            for (j = 0; j < 8 && new_pwd[j] != '\0' && existing_pwd[j] != '\0'; j++) {
+              if (new_pwd[j] != existing_pwd[j]) {
+                break;
+              }
+            }
+            if (new_pwd[j] == existing_pwd[j] && new_pwd[j] == '\0') {
+              xstr_set_cstr(reply_msg, "[warning] same passwd (first 8 bytes) already exists!\r\n");
+              printf("%s", xstr_get_cstr(reply_msg));
+            }
+          }
         }
-
         xvec_push_back(vnc_mapping, new_mapping);
+        send(client_sockfd, xstr_get_cstr(reply_msg), xstr_len(reply_msg) + 1, 0);
+        xstr_delete(reply_msg);
       } else if (xcstr_startwith_cstr(buf, "del.dest") == XTRUE) {
-        // TODO
+        xstr reply_msg = xstr_new();
+        int del_count = 0;
+        if (new_mapping->dest_port > 0) {
+          // dest port given
+          for (i = xvec_size(vnc_mapping) - 1; i >= 0; i--) {
+            // removing from the back ends
+            vnc_map* mapping = xvec_get(vnc_mapping, i);
+            if (strcmp(xstr_get_cstr(mapping->dest_host), xstr_get_cstr(new_mapping->dest_host)) == 0 && mapping->dest_port == new_mapping->dest_port) {
+              xvec_remove(vnc_mapping, i);
+              del_count++;
+            }
+          }
+        } else {
+          // dest port not given, delete all mapping with same host
+          for (i = xvec_size(vnc_mapping) - 1; i >= 0; i--) {
+            vnc_map* mapping = xvec_get(vnc_mapping, i);
+            if (strcmp(xstr_get_cstr(mapping->dest_host), xstr_get_cstr(new_mapping->dest_host)) == 0) {
+              xvec_remove(vnc_mapping, i);
+              del_count++;
+            }
+          }
+        }
+        xstr_printf(reply_msg, "%d proxy(s) deleted\r\n", del_count);
+        send(client_sockfd, xstr_get_cstr(reply_msg), xstr_len(reply_msg), 0);
+        xstr_delete(reply_msg);
       } else if (xcstr_startwith_cstr(buf, "del.newpasswd") == XTRUE) {
-        // TODO
+        int del_count = 0;
+        xstr reply_msg = xstr_new();
+        for (i = xvec_size(vnc_mapping) - 1; i >= 0; i--) {
+          // removing from the back ends
+          vnc_map* mapping = xvec_get(vnc_mapping, i);
+          if (strcmp(xstr_get_cstr(mapping->new_passwd), xstr_get_cstr(new_mapping->new_passwd)) == 0) {
+            xvec_remove(vnc_mapping, i);
+            del_count++;
+          }
+        }
+        xstr_printf(reply_msg, "%d proxy(s) deleted!\r\n", del_count);
+        send(client_sockfd, xstr_get_cstr(reply_msg), xstr_len(reply_msg), 0);
+        xstr_delete(reply_msg);
       } else {
         // failure
         strcpy(buf, "failure: command not known\r\n");

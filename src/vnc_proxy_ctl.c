@@ -74,10 +74,19 @@ xsuccess add_vnc_proxy(xstr vnc_host, int vnc_port, const char* new_passwd, cons
   int sockfd = connect_server();
   printf("[info] add, dest=%s:%d, new_pass=%s, old_pass=%s\n", xstr_get_cstr(vnc_host), vnc_port, new_passwd, old_passwd);
   if (sockfd > 0) {
+    int buf_len = 8192;
+    char* buf = xmalloc_ty(buf_len, char);
+    int cnt;
     xstr msg = xstr_new();
     xstr_printf(msg, "add\r\ndest_host=%s\r\ndest_port=%d\r\nold_passwd=%s\r\nnew_passwd=%s\r\n", xstr_get_cstr(vnc_host), vnc_port, old_passwd, new_passwd);
+    printf("[info] sending to server:\n%s\n", xstr_get_cstr(msg));
     send(sockfd, xstr_get_cstr(msg), xstr_len(msg) + 1, 0);
+    cnt = recv(sockfd, buf, buf_len, 0);
+    buf[cnt] = '\0';
+    printf("[info] recv'ed from server: '%s'\n", buf);
+
     xstr_delete(msg);
+    xfree(buf);
     close(sockfd);
   }
   return ret;
@@ -85,13 +94,54 @@ xsuccess add_vnc_proxy(xstr vnc_host, int vnc_port, const char* new_passwd, cons
 
 xsuccess del_vnc_proxy_by_passwd(const char* new_passwd) {
   xsuccess ret = XFAILURE;
+  int sockfd = connect_server();
   printf("[info] del, new_pass=%s\n", new_passwd);
+  if (sockfd > 0) {
+    int buf_len = 8192;
+    char* buf = xmalloc_ty(buf_len, char);
+    int cnt;
+    xstr msg = xstr_new();
+    xstr_printf(msg, "del.newpasswd\r\nnew_passwd=%s\r\n", new_passwd);
+    printf("[info] sending to server:\n%s\n", xstr_get_cstr(msg));
+    send(sockfd, xstr_get_cstr(msg), xstr_len(msg) + 1, 0);
+    cnt = recv(sockfd, buf, buf_len, 0);
+    buf[cnt] = '\0';
+    printf("[info] recv'ed from server: '%s'\n", buf);
+
+    xfree(buf);
+    xstr_delete(msg);
+    close(sockfd);
+  }
   return ret;
 }
 
 xsuccess del_vnc_proxy_by_dest(xstr vnc_host, int vnc_port) {
   xsuccess ret = XFAILURE;
-  printf("[info] del, dest=%s:%d\n", xstr_get_cstr(vnc_host), vnc_port);
+  int sockfd = connect_server();
+  if (vnc_port > 0) {
+    printf("[info] del, dest=%s:%d\n", xstr_get_cstr(vnc_host), vnc_port);
+  } else {
+    printf("[info] del, dest=%s:%%\n", xstr_get_cstr(vnc_host));
+  }
+  if (sockfd > 0) {
+    int buf_len = 8192;
+    char* buf = xmalloc_ty(buf_len, char);
+    int cnt;
+    xstr msg = xstr_new();
+    if (vnc_port > 0) {
+      xstr_printf(msg, "del.dest\r\ndest_host=%s\r\ndest_port=%d\r\n", xstr_get_cstr(vnc_host), vnc_port);
+    } else {
+      xstr_printf(msg, "del.dest\r\ndest_host=%s\r\n", xstr_get_cstr(vnc_host));
+    }
+    printf("[info] sending to server:\n%s\n", xstr_get_cstr(msg));
+    send(sockfd, xstr_get_cstr(msg), xstr_len(msg) + 1, 0);
+    cnt = recv(sockfd, buf, buf_len, 0);
+    buf[cnt] = '\0';
+    printf("[info] recv'ed from server: '%s'\n", buf);
+    xfree(buf);
+    xstr_delete(msg);
+    close(sockfd);
+  }
   return ret;
 }
 
@@ -137,7 +187,7 @@ int main(int argc, char* argv[]) {
   }
   if (argc == 1 || ask_for_help == XTRUE) {
     printf("usage: vnc_proxy_ctl add [-p <new password>|--password=<new password>] [-op <old password>|--old-password=<old password>] -d <dest>|--dest=<dest>\n");
-    printf("       vnc_proxy_ctl del [-p <new password>|--password=<new password>] [-d <dest>|--dest=<dest>]\n");
+    printf("       vnc_proxy_ctl del [-p <new password>|--password=<new password>] [-d <dest>|--dest=<dest_ip>[:dest_port]]\n");
     printf("       vnc_proxy_ctl list\n");
     exit(0);
   }
@@ -188,6 +238,9 @@ int main(int argc, char* argv[]) {
       for (i = 0; i < split_index; i++) {
         xstr_append_char(vnc_host, dest_cstr[i]);
       }
+    } else if (strcmp(argv[1], "del") == 0) {
+      vnc_port = -1;
+      xstr_set_cstr(vnc_host, xstr_get_cstr(dest_addr));
     } else {
       printf("[error] dest port not given! dest addr is like 'ip:port'!\n");
       exit(1);
