@@ -1,4 +1,5 @@
 #include <stddef.h>
+#include <stdlib.h>
 #include <dirent.h>
 #include <string.h>
 #include <arpa/inet.h>
@@ -10,6 +11,7 @@
 
 #include "xmemory.h"
 #include "xutils.h"
+#include "xcrypto.h"
 
 // adapted from www.jb.man.ac.uk/~slowe/cpp/itoa.html
 char* xitoa(int value, char* buf, int base) {
@@ -333,5 +335,51 @@ xsuccess xfilesystem_normalize_abs_path(const char* abs_path, xstr norm_path) {
 
   xstr_delete(seg);
   return ret;
+}
+
+long xfilesystem_parse_filesize(const char* size_cstr) {
+  long size = 0;
+  char* p_end;
+  double d_val = strtod(size_cstr, &p_end);
+  int i;
+  long unit = 1;
+  if (p_end == size_cstr) {
+    return -1;
+  }
+  for (i = 0; p_end[i] != '\0'; i++) {
+    if (p_end[i] == ' ') {
+      continue;
+    } else if (p_end[i] == 'G' || p_end[i] == 'g') {
+      unit = 1024L * 1024 * 1024;
+    } else if (p_end[i] == 'M' || p_end[i] == 'm') {
+      unit = 1024L * 1024;
+    } else if (p_end[i] == 'K' || p_end[i] == 'k') {
+      unit = 1024L;
+    } else if (p_end[i] == 'B' || p_end[i] == 'b') {
+      unit = 1;
+    }
+    break;
+  }
+  size = (long) (d_val * unit);
+  return size;
+}
+
+
+int xhash_hash_cstr(void* key) {
+  int hv = 0;
+  unsigned char digest[16];
+  int i;
+  char* cstr = (char *) key;
+  xmd5 xm = xmd5_new();
+  xmd5_feed(xm, cstr, strlen(cstr));
+  xmd5_result(xm, digest);
+  for (i = 0; i < 16; i++) {
+    hv ^= (((int) digest[i]) << ((4 * i) % 16));
+  }
+  xmd5_delete(xm);
+  if (hv < 0) {
+    hv = -hv;
+  }
+  return hv;
 }
 

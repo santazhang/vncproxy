@@ -209,5 +209,32 @@ xsuccess xfilesystem_path_cdup(xstr norm_path);
 */
 xsuccess xfilesystem_normalize_abs_path(const char* abs_path, xstr norm_path);
 
+
+/**
+  @brief
+    Convert file size in c-string form to int value. Such as "10M" -> 10 * 1024 * 1024.
+
+  @param size_cstr
+    File size in cstr. Units are: G, g, M, m, K, k, B, b. If no units given, b (bytes) will be assumed.
+    There could be space between unit and the size value, such as "10 Mb".
+
+  @return
+    File size on succcess, or -1 will be returned if failed.
+*/
+long xfilesystem_parse_filesize(const char* size_cstr);
+
+/**
+  @brief
+    Get hash value of a c-string.
+
+  @param key
+    Pointer to the c-string.
+
+  @return
+    The hash value of the c-string.
+*/
+int xhash_hash_cstr(void* key);
+
+
 #endif  // XUTILS_H_
 

@@ -38,7 +38,7 @@ typedef int (*xhash_hash)(void* key);
     The key to be compared.
 
   @return
-    1 if the keys are equal, otherwise 0.
+    XTRUE if the keys are equal, otherwise XFALSE.
 */
 typedef xbool (*xhash_eql)(void* key1, void* key2);
 
