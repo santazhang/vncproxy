@@ -128,7 +128,7 @@ void xstr_append_cstr(xstr xs, const char* cs);
   @return
     XTRUE or XFALSE.
 */
-xbool xstr_startwith_cstr(xstr xs, char* head);
+xbool xstr_startwith_cstr(xstr xs, const char* head);
 
 /**
   @brief
@@ -153,5 +153,30 @@ xstr xstr_copy(xstr orig);
     Will return '\\0' if xstr has length 0.
 */
 char xstr_last_char(xstr xs);
+
+/**
+  @brief
+    Test if 2 xstr is equal.
+
+  @param xstr1
+    The xstr to be tested.
+  @param xstr2
+    The xstr to be tested.
+
+  @return
+    Whether the 2 xstr is equal.
+*/
+xbool xstr_eql(xstr xstr1, xstr xstr2);
+
+/**
+  @brief
+    Strip an xstr.
+  
+  @param xs
+    The xstr object to be stripped.
+  @param strip_set
+    A c-string containing all the chars to be stripped.
+*/
+void xstr_strip(xstr xs, char* strip_set);
 
 #endif  // XSTR_H_

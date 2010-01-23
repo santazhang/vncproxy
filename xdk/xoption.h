@@ -2,6 +2,7 @@
 #define XDK_XOPTION_H_
 
 #include "xdef.h"
+#include "xvec.h"
 
 /**
   @author
@@ -77,6 +78,23 @@ const char* xoption_get(xoption xopt, const char* name);
 
 /**
   @brief
+    Get an array of options.
+
+  @param xopt
+    The xoption object.
+  @param name
+    Name of the option. If NULL is given, the ordinary command line arguments will be returned.
+
+  @return
+    xvec of option values.
+
+  @warning
+    Currently, this function only supports NULL for name.
+*/
+xvec xoption_get_array(xoption xopt, const char* name);
+
+/**
+  @brief
     Get the number of arguments of a certain option name.
 
   @param xopt
@@ -85,7 +103,7 @@ const char* xoption_get(xoption xopt, const char* name);
     The name of option, could be either short or long name.
 
   @return
-    -1 if option not found, 0 if option does not have parameter, otherwise the length of array from xoption_get() is returned.
+    -1 if option not found, 0 if option does not have parameter, otherwise the length of array from xoption_get_array() is returned.
 */
 int xoption_get_size(xoption xopt, const char* name);
 

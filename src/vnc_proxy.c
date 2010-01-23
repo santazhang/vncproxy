@@ -81,6 +81,9 @@ static void vnc_proxy_acceptor(xsocket client_xs, void* args) {
     has_error = XTRUE;
   }
 
+  buf[12] = '\0';
+  printf("client version info: %s\n", buf);
+
   if (has_error == XFALSE && xcstr_startwith_cstr((char *) buf, "RFB 003.008") == XFALSE) {
     fprintf(stderr, "[failure] client vnc version not supported!\n");
     has_error = XTRUE;

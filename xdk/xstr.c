@@ -171,7 +171,7 @@ int xstr_printf(xstr xs, const char* fmt, ...) {
   return cnt;
 }
 
-xbool xstr_startwith_cstr(xstr xs, char* head) {
+xbool xstr_startwith_cstr(xstr xs, const char* head) {
   int i;
   for (i = 0; xs->str[i] != '\0' && head[i] != '\0'; i++) {
     if (xs->str[i] != head[i])
@@ -193,3 +193,58 @@ char xstr_last_char(xstr xs) {
     return xs->str[xs->len - 1];
   }
 }
+
+xbool xstr_eql(xstr xstr1, xstr xstr2) {
+  if (strcmp(xstr_get_cstr(xstr1), xstr_get_cstr(xstr2)) == 0) {
+    return XTRUE;
+  } else {
+    return XFALSE;
+  }
+}
+
+
+void xstr_strip(xstr xs, char* strip_set) {
+  int new_begin = 0;
+  int new_end = xs->len;  // exclusive end point
+  int i;
+  xbool should_strip;
+  char* stripped_cstr;
+
+  while (new_begin < new_end) {
+    should_strip = XFALSE;
+    for (i = 0; strip_set[i] != '\0'; i++) {
+      if (xs->str[new_begin] == strip_set[i]) {
+        should_strip = XTRUE;
+        break;
+      }
+    }
+    if (should_strip == XTRUE) {
+      new_begin++;
+    } else {
+      break;
+    }
+  }
+
+  while (new_begin < new_end) {
+    should_strip = XFALSE;
+    for (i = 0; strip_set[i] != '\0'; i++) {
+      if (xs->str[new_end - 1] == strip_set[i]) {
+        should_strip = XTRUE;
+        break;
+      }
+    }
+    if (should_strip == XTRUE) {
+      new_end--;
+    } else {
+      break;
+    }
+  }
+  
+  stripped_cstr = xmalloc_ty(new_end - new_begin + 1, char);
+  memcpy(stripped_cstr, xs->str + new_begin, new_end - new_begin);
+  stripped_cstr[new_end - new_begin] = '\0';
+  xstr_set_cstr(xs, stripped_cstr);
+  xfree(stripped_cstr);
+
+}
+

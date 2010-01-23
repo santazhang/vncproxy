@@ -128,6 +128,14 @@ const char* xoption_get(xoption xopt, const char* name) {
   return xhash_get(xopt->opt, (void *) name);
 }
 
+xvec xoption_get_array(xoption xopt, const char* name) {
+  if (name == NULL) {
+    return xopt->leftover;
+  } else {
+    return NULL;
+  }
+}
+
 int xoption_get_size(xoption xopt, const char* name) {
   if (name != NULL) {
     int* p_len = xhash_get(xopt->optlen, (void *) name);

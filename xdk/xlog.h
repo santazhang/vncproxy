@@ -104,15 +104,12 @@ xsuccess xlog_init(int argc, char* argv[]);
     The logging level, could be 0 (fatal), 1 (error), 2 (warning), 3 (info), 4 (debug), 5~7 (user defined).
   @param fmt
     The formatting string.
-
-  @return
-    Whether the log was correctly written.
 */
 #define xlog(level, fmt, ...) { \
   if (level <= XLOG_LEVEL7) { \
     xlog_start_record(level); \
     printf(fmt, ## __VA_ARGS__); \
-    if (xlog_is_screen_only() == XFALSE) {  \
+    if (xlog_is_screen_only() == XFALSE && xlog_get_log_fp() != NULL) {  \
       fprintf(xlog_get_log_fp(), fmt, ## __VA_ARGS__); \
     } \
     xlog_end_record(fmt); \
@@ -123,6 +120,54 @@ xsuccess xlog_init(int argc, char* argv[]);
 
 /**
   @brief
+    Helper macro, make you type less.
+*/
+#define xlog_fatal(fmt, ...)    xlog(XLOG_FATAL, fmt, ## __VA_ARGS__)
+
+/**
+  @brief
+    Helper macro, make you type less.
+*/
+#define xlog_error(fmt, ...)    xlog(XLOG_ERROR, fmt, ## __VA_ARGS__)
+
+/**
+  @brief
+    Helper macro, make you type less.
+*/
+#define xlog_warning(fmt, ...)  xlog(XLOG_WARNING, fmt, ## __VA_ARGS__)
+
+/**
+  @brief
+    Helper macro, make you type less.
+*/
+#define xlog_info(fmt, ...)     xlog(XLOG_INFO, fmt, ## __VA_ARGS__)
+
+/**
+  @brief
+    Helper macro, make you type less.
+*/
+#define xlog_debug(fmt, ...)    xlog(XLOG_DEBUG, fmt, ## __VA_ARGS__)
+
+/**
+  @brief
+    Helper macro, make you type less.
+*/
+#define xlog_level5(fmt, ...)   xlog(XLOG_LEVEL5, fmt, ## __VA_ARGS__)
+
+/**
+  @brief
+    Helper macro, make you type less.
+*/
+#define xlog_level6(fmt, ...)   xlog(XLOG_LEVEL6, fmt, ## __VA_ARGS__)
+
+/**
+  @brief
+    Helper macro, make you type less.
+*/
+#define xlog_level7(fmt, ...)   xlog(XLOG_LEVEL7, fmt, ## __VA_ARGS__)
+
+/**
+  @brief
     Start writing a log record.
 
   @param level
@@ -130,6 +175,9 @@ xsuccess xlog_init(int argc, char* argv[]);
 
   @return
     Whether the log was correctly written.
+
+  @warning
+    Do not call this function directly. Use xlog() instead!
 */
 void xlog_start_record(int level);
 
@@ -142,6 +190,9 @@ void xlog_start_record(int level);
 
   @return
     Whether the log was correctly written.
+
+  @warning
+    Do not call this function directly. Use xlog() instead!
 */
 void xlog_end_record(const char* fmt);
 
@@ -151,6 +202,9 @@ void xlog_end_record(const char* fmt);
 
   @return
     The file pointer.
+
+  @warning
+    Do not call this function directly. Use xlog() instead!
 */
 FILE* xlog_get_log_fp();
 
@@ -160,6 +214,9 @@ FILE* xlog_get_log_fp();
 
   @return
     XTRUE if logs are written to stdout only.
+
+  @warning
+    Do not call this function directly. Use xlog() instead!
 */
 xbool xlog_is_screen_only();
 

@@ -12,6 +12,7 @@
 #include "xmemory.h"
 #include "xutils.h"
 #include "xcrypto.h"
+#include "xsys.h"
 
 // adapted from www.jb.man.ac.uk/~slowe/cpp/itoa.html
 char* xitoa(int value, char* buf, int base) {
@@ -45,7 +46,7 @@ char* xitoa(int value, char* buf, int base) {
   return buf;
 }
 
-
+// adapted from www.jb.man.ac.uk/~slowe/cpp/itoa.html
 char* xltoa(long long value, char* buf, int base) {
   char* ptr = buf;
   char* ptr1 = buf;
@@ -150,8 +151,8 @@ xsuccess xinet_get_sockaddr(const char* host, int port, struct sockaddr_in* addr
 }
 
 void xjoin_path_cstr(xstr fullpath, const char* current_dir, const char* append_dir) {
-  char sep = '/'; // filesystem path seperator
-  char* sep_str = "/";
+  const char sep = xsys_fs_sep_char; // filesystem path seperator
+  const char* sep_str = xsys_fs_sep_cstr;
   if (append_dir[0] == sep) {
     xstr_set_cstr(fullpath, append_dir);
   } else {
@@ -174,6 +175,14 @@ void xsleep_msec(int msec) {
   nanosleep(&req, NULL);
 }
 
+xbool xfilesystem_exists(const char* path) {
+  struct stat st;
+  if (lstat(path, &st) != 0) {
+    return XFALSE;
+  } else {
+    return XTRUE;
+  }
+}
 
 xbool xfilesystem_is_file(const char* path, xsuccess* optional_succ) {
   struct stat st;
@@ -257,11 +266,11 @@ xsuccess xfilesystem_rmrf(const char* path) {
 // the result will have an '/' at the end
 xsuccess xfilesystem_path_cdup(xstr norm_path) {
   // check if not '/'
-  if (strcmp(xstr_get_cstr(norm_path), "/") != 0) {
+  if (strcmp(xstr_get_cstr(norm_path), xsys_fs_sep_cstr) != 0) {
     // ok, not '/', could cdup
     int new_len = xstr_len(norm_path);
     int index = new_len - 1;
-    char sep = '/'; // filesystem separator
+    char sep = xsys_fs_sep_char; // filesystem separator
     char* new_cstr_path = xmalloc_ty(new_len + 1, char);
     strcpy(new_cstr_path, xstr_get_cstr(norm_path));
     
@@ -282,8 +291,8 @@ xsuccess xfilesystem_path_cdup(xstr norm_path) {
 
 xsuccess xfilesystem_normalize_abs_path(const char* abs_path, xstr norm_path) {
   xsuccess ret = XSUCCESS;
-  char sep = '/'; // filesystem path seperator
-  char* sep_str = "/";  // filesystem path seperator, in c-string
+  const char sep = xsys_fs_sep_char; // filesystem path seperator
+  const char* sep_str = xsys_fs_sep_cstr;  // filesystem path seperator, in c-string
   xstr seg = xstr_new();  // a segment in the path
   int i;
 
@@ -381,5 +390,43 @@ int xhash_hash_cstr(void* key) {
     hv = -hv;
   }
   return hv;
+}
+
+int xhash_hash_xstr(void* key) {
+  xstr xs = (xstr) key;
+  return xhash_hash_cstr((void *) xstr_get_cstr(xs));
+}
+
+xbool xhash_eql_xstr(void* key1, void* key2) {
+  return xstr_eql((xstr) key1, (xstr) key2);
+}
+
+xsuccess xgetline_fp(FILE* fp, xstr line) {
+  xsuccess ret = XSUCCESS;
+  xstr_set_cstr(line, "");
+  if (feof(fp)) {
+    ret = XFAILURE;
+  } else {
+    int code;
+    int counter = 0;
+    for (;;) {
+      counter++;
+      code = fgetc(fp);
+      if (code == '\r') {
+        continue;
+      } else if (code == '\n') {
+        break;
+      } else if (feof(fp)) {
+        if (counter == 1) {
+          ret = XFAILURE;
+        }
+        break;
+      } else {
+        char ch = (char) code;
+        xstr_append_char(line, ch);
+      }
+    }
+  }
+  return ret;
 }
 

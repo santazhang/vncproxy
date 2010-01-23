@@ -12,6 +12,7 @@
     Miscellaneous utilities.
 */
 
+#include <stdio.h>
 #include <netinet/in.h>
 
 #include "xdef.h"
@@ -143,6 +144,18 @@ void xsleep_msec(int msec);
 
 /**
   @brief
+    Check if filesystem entry exists.
+
+  @param path
+    Path to the filesystem entry.
+
+  @return
+    Whether the filesystem entry exists.
+*/
+xbool xfilesystem_exists(const char* path);
+
+/**
+  @brief
     Remove files, (possibily) recursive, like "rm -rf".
 
   @param path
@@ -235,6 +248,48 @@ long xfilesystem_parse_filesize(const char* size_cstr);
 */
 int xhash_hash_cstr(void* key);
 
+
+/**
+  @brief
+    Get hash value of an x-string.
+
+  @param key
+    Pointer to the x-string.
+
+  @return
+    The hash value of the x-string.
+*/
+int xhash_hash_xstr(void* key);
+
+
+/**
+  @brief
+    A wrapper around xstr_eql(), prevent gcc from warning.
+
+  @param key1
+    A key to be compared.
+  @param key2
+    A key to be compared.
+
+  @return
+    Whether the 2 xstr is equal. 
+*/
+xbool xhash_eql_xstr(void* key1, void* key2);
+
+
+/**
+  @brief
+    Get a line from file pointer.
+
+  @param fp
+    The file pointer.
+  @param line
+    Where the new line will be stored. This param is cleared every time. The EOL character (\\n, \\r\\n) is trimmed.
+
+  @return
+    If new lines are read, XSUCCESS will be returned. Other wise (including EOF) XFAILURE is returned.
+*/
+xsuccess xgetline_fp(FILE* fp, xstr line);
 
 #endif  // XUTILS_H_
 
