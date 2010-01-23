@@ -78,17 +78,14 @@ xsuccess xconf_load(xconf xcf, const char* fname) {
 
 static xbool write_item_visitor(void* key, void* value, void* args) {
   FILE* fp = (FILE *) args;
-  printf("%s=%s\n", xstr_get_cstr((xstr) key), xstr_get_cstr((xstr) value));
   fprintf(fp, "%s=%s\n", xstr_get_cstr((xstr) key), xstr_get_cstr((xstr) value));
   return XTRUE;
 }
 
 static xbool write_section_visitor(void* key, void* value, void* args) {
   FILE* fp = (FILE *) args;
-  printf("[%s]\n", xstr_get_cstr((xstr) key));
   fprintf(fp, "[%s]\n", xstr_get_cstr((xstr) key));
   xhash_visit((xhash) value, write_item_visitor, fp);
-  printf("\n");
   fprintf(fp, "\n");
   return XTRUE;
 }
@@ -116,16 +113,16 @@ xsuccess xconf_save(xconf xcf, const char* fname) {
 }
 
 xhash xconf_get_section(xconf xcf, const char* section_name) {
+  xhash ret = NULL;
   if (section_name != NULL) {
     xstr query_xs = xstr_new();
-    xhash ret = NULL;
     xstr_set_cstr(query_xs, section_name);
     ret = (xhash) xhash_get(xcf->sections, query_xs);
     xstr_delete(query_xs);
-    return ret;
   } else {
-    return xcf->default_sec;
+    ret = xcf->default_sec;
   }
+  return ret;
 }
 
 xstr xconf_get_value(xconf xcf, const char* section_name, const char* item_name) {

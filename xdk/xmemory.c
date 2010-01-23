@@ -271,9 +271,8 @@ static xbool xmem_log_table_print_visitor(void* ptr, const char* file, int line,
 #endif  // XMEM_DEBUG == 1
 
 void* xmalloc(int size, ...) {
-  if (size <= 0)
-    return NULL;
-  else {
+  void* ret = NULL;
+  if (size > 0) {
     void* ptr;
 #ifdef HAVE_LIBPTHREAD
     pthread_mutex_lock(&xmem_mutex);
@@ -304,8 +303,9 @@ void* xmalloc(int size, ...) {
 #ifdef HAVE_LIBPTHREAD
     pthread_mutex_unlock(&xmem_mutex);
 #endif  // HAVE_LIBPTHREAD
-    return ptr;
+    ret = ptr;
   }
+  return ret;
 }
 
 void xfree(void* ptr) {

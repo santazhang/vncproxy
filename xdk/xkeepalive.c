@@ -12,6 +12,7 @@
 #include "xkeepalive.h"
 #include "xutils.h"
 #include "xdef.h"
+#include "xlog.h"
 
 /**
   @brief
@@ -60,10 +61,10 @@ static void monitor_server_real(keep_alive_info* info) {
   // please note the message key: info->msg_key_base + getpid(), this prevents multiple processes using the same message
   int msgid = msgget(info->msg_key_base + getpid(), IPC_CREAT | IPC_EXCL | 0666);
   my_msg msgbuf;
-  printf("[xkeepalive] monitor %d started message server\n", getpid());
+  xlog_debug("[xkeepalive] monitor %d started message server\n", getpid());
   for (;;) {
     msgrcv(msgid, &msgbuf, sizeof(my_msg), info->msg_type, 0);
-    printf("[xkeepalive] monitor %d's message server got message '%s' with value %ld\n", getpid(), msgbuf.cmd, msgbuf.value);
+    xlog_debug("[xkeepalive] monitor %d's message server got message '%s' with value %ld\n", getpid(), msgbuf.cmd, msgbuf.value);
 
     if (xcstr_startwith_cstr(msgbuf.cmd, "new_monitor")) {
       int i;
@@ -91,7 +92,7 @@ static void monitor_server_real(keep_alive_info* info) {
     } else if (xcstr_startwith_cstr(msgbuf.cmd, "change_target")) {
       info->target_pid = msgbuf.value;
     } else {
-      printf("[xkeepalive] don't know how to deal with '%s' command, ignore it\n", msgbuf.cmd);
+      xlog_warning("[xkeepalive] don't know how to deal with '%s' command, ignore it\n", msgbuf.cmd);
     }
   }
 }
@@ -116,7 +117,7 @@ static void monitors_broadcast(keep_alive_info* info, char* cmd, long value) {
     msgbuf.pid = getpid();
     strcpy(msgbuf.cmd, cmd);
     msgbuf.value = value;
-    printf("[xkeepalive] monitor %d is sending '%s' with value %ld to monitor %d\n", getpid(), msgbuf.cmd, msgbuf.value, info->monitor_pids[i]);
+    xlog_debug("[xkeepalive] monitor %d is sending '%s' with value %ld to monitor %d\n", getpid(), msgbuf.cmd, msgbuf.value, info->monitor_pids[i]);
     msgsnd(msgid, &msgbuf, sizeof(my_msg) - sizeof(long), 0);
   }
 }
@@ -145,7 +146,7 @@ static void check_alive_monitors(keep_alive_info* info) {
 
     // just checking if alive, no signal sent
     if (kill(info->monitor_pids[i], 0) < 0) {
-      printf("[xkeepalive] oops, monitor %d is dead!\n", info->monitor_pids[i]);
+      xlog_warning("[xkeepalive] oops, monitor %d is dead!\n", info->monitor_pids[i]);
       monitors_broadcast(info, "monitor_die", info->monitor_pids[i]);
     }
   }
@@ -155,12 +156,12 @@ static void check_is_target_alive(keep_alive_info* info) {
   // just checking if alive, no signal sent
   if (kill(info->target_pid, 0) < 0) {
     int new_target_pid;
-    printf("[xkeepalive] oops, target process %d is dead!\n", info->target_pid);
+    xlog_warning("[xkeepalive] oops, target process %d is dead!\n", info->target_pid);
     
     new_target_pid = my_fork();
     if (new_target_pid != 0) {
       // parent process, still work as monitor
-      printf("[xkeepalive] recover by reforking worker process, with pid %d\n", new_target_pid);
+      xlog_info("[xkeepalive] recover by reforking worker process, with pid %d\n", new_target_pid);
       monitors_broadcast(info, "change_target", new_target_pid);
     } else {
       // child process, recover the original work
@@ -189,22 +190,22 @@ static int monitor(keep_alive_info* info) {
     // could use locking instead
     int sleep_time = sleep_min + rand() % sleep_rand_range;
     xsleep_msec(sleep_time);  // sleep, in milliseconds
-    printf("[xkeepalive] monitor process %d woke up from %d ms sleep interval\n", getpid(), sleep_time);
+    xlog_debug("[xkeepalive] monitor process %d woke up from %d ms sleep interval\n", getpid(), sleep_time);
 
     // check failed monitors
     // if failure happened, broadcast failed monitors to running monitors
-    printf("[xkeepalive] checking alive monitors\n");
+    xlog_debug("[xkeepalive] checking alive monitors\n");
     check_alive_monitors(info);
 
     // check if there is too few monitors
     while (info->current_monitors < info->expected_monitors) {
       int pid = fork_new_monitor(info);
-      printf("[xkeepalive] forked new monitor with pid %d\n", pid);
+      xlog_debug("[xkeepalive] forked new monitor with pid %d\n", pid);
     }
 
     // check if target failed
     // if failure happened, fork new child process, and broad cast to all monitors
-    printf("[xkeepalive] checking alive working process\n");
+    xlog_debug("[xkeepalive] checking alive working process\n");
     check_is_target_alive(info);
   }
   return 0;

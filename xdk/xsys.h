@@ -24,5 +24,5 @@ extern const char xsys_fs_sep_char;
 */
 extern const char* xsys_fs_sep_cstr;
 
-#endif
+#endif  // #ifndef XDK_XSYS_H_
 

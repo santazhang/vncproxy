@@ -238,6 +238,65 @@ def assert_src_header_pair
   end
 end
 
+def warn_bad_style
+  flist = all_src_files
+
+  flist.each do |path|
+    if defined? NO_STYLE_CHECK
+      should_skip = false
+      NO_STYLE_CHECK.each do |mod|
+        if path.start_with? mod
+          should_skip = true
+          break
+        end
+      end
+      next if should_skip
+    end
+
+    # check if #endif are followed by comments
+    File.open(path) do |f|
+      row = 1
+      f.each_line do |line|
+        if line =~ /^\#endif/
+          unless line.include? '//' or line.include? '/*'
+            puts "style warning: #{path}:#{row}, #endif should be followed by comments!"
+          end
+        end
+        row += 1
+      end
+    end
+
+    # check if there is multiple return in one function, when there is memory allocation
+    File.open(path) do |f|
+      inside_fun = nil
+      return_rows = []
+      row = 1
+      has_mem_alloc = false
+      f.each_line do |line|
+        if line =~ /^[a-z].*\{[ \t]*$/
+          inside_fun = line.strip[0..-2].strip
+          return_rows = []
+          has_mem_alloc = false
+        elsif line =~ /^\}.*/
+          inside_fun = nil
+          if return_rows.size > 1 and has_mem_alloc == true
+            puts "style warning: #{path}:[#{return_rows.join ", "}], multiple return statement in one function, when there is memory allocation!"
+          end
+          return_rows = []
+          has_mem_alloc = false
+        elsif inside_fun != nil
+          if line =~ /^[ \t]*return .*;.*$/
+            return_rows << row
+          elsif line =~ /[a-z]*_new\(/ or line =~ /malloc[a-z_]*\(/
+            has_mem_alloc = true
+          end
+        end
+        row += 1
+      end
+    end
+  end
+end
+
 desc "Do style checking"
 task :check do
   puts "Checking project..."
@@ -246,6 +305,7 @@ task :check do
     puts "  #{f}"
   end
   puts "--"
+  warn_bad_style
   assert_no_duplicate_fname
   puts "No duplicate file name"
   assert_src_header_pair
