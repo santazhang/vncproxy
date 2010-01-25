@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <sys/un.h>
 #include <pthread.h>
+#include <errno.h>
 
 #include "xstr.h"
 #include "xnet.h"
@@ -14,6 +15,7 @@
 #include "xmemory.h"
 #include "xcrypto.h"
 #include "xutils.h"
+#include "xlog.h"
 
 #include "vnc_auth/d3des.h"
 
@@ -68,24 +70,24 @@ static void vnc_proxy_acceptor(xsocket client_xs, void* args) {
   xstr vnc_host = xstr_new();
   int vnc_port = 5901;
 
-  printf("[info] got new client!\n");
+  xlog_info("got new client!\n");
 
   // handshake on VNC version, only support 3.8
   if (has_error == XFALSE && xsocket_write(client_xs, "RFB 003.008\n", 12) == -1) {
-    fprintf(stderr, "[error] cannot write to client\n");
+    xlog_error("cannot write to client, errno = %d : %s\n", errno, strerror(errno));
     has_error = XTRUE;
   }
 
   if (has_error == XFALSE && xsocket_read(client_xs, buf, 12) != 12) {
-    fprintf(stderr, "[error] cannot read from client\n");
+    xlog_error("cannot read from client\n");
     has_error = XTRUE;
   }
 
   buf[12] = '\0';
-  printf("client version info: %s\n", buf);
+  xlog_info("client version info: %s\n", buf);
 
   if (has_error == XFALSE && xcstr_startwith_cstr((char *) buf, "RFB 003.008") == XFALSE) {
-    fprintf(stderr, "[failure] client vnc version not supported!\n");
+    xlog_error("client vnc version not supported!\n");
     has_error = XTRUE;
   }
 
@@ -97,11 +99,11 @@ static void vnc_proxy_acceptor(xsocket client_xs, void* args) {
   }
 
   if (has_error == XFALSE && xsocket_read(client_xs, buf, 1) == -1) {
-    printf("[error] cannot read from client\n");
+    xlog_error("cannot read from client\n");
     has_error = XTRUE;
   }
 
-  printf("[info] client choose security type %d\n", (int) buf[0]);
+  xlog_info("client choose security type %d\n", (int) buf[0]);
 
   // make random challenge
   for (i = 0; i < challenge_size; i++) {
@@ -132,7 +134,7 @@ static void vnc_proxy_acceptor(xsocket client_xs, void* args) {
       rfbDes(challenge + j, expected_response + j);
     }
 
-    printf("[info] comparing for auth:\n");
+    printf("comparing for auth:\n");
     printf("[info] client:\n");
     print_bytes((char *) response, challenge_size);
     printf("[info] expected:\n");
@@ -150,7 +152,7 @@ static void vnc_proxy_acceptor(xsocket client_xs, void* args) {
         real_server_auth_key[j] = '\0';
         j++;
       }
-      printf("[info] client was mapped to %s:%d\n", xstr_get_cstr(vnc_host), vnc_port);
+      xlog_info("client was mapped to %s:%d\n", xstr_get_cstr(vnc_host), vnc_port);
       break;
     }
   }
@@ -158,7 +160,7 @@ static void vnc_proxy_acceptor(xsocket client_xs, void* args) {
 
   if (proxy_auth_passed != XTRUE) {
     char* failure_message = "authentication failed";
-    printf("[info] auth failed\n");
+    xlog_info("auth failed\n");
 
     // well, be careful about the endians
     buf[0] = 0;
@@ -170,7 +172,7 @@ static void vnc_proxy_acceptor(xsocket client_xs, void* args) {
     buf[6] = 0;
     buf[7] = (unsigned char) strlen(failure_message);
     strcpy((char *) (buf + 8), failure_message);
-    printf("[info] going to write the following error message:\n");
+    xlog_info("going to write the following error message:\n");
     print_bytes((char *) buf, buf[7] + 8);
     xsocket_write(client_xs, buf, buf[7] + 8);
     has_error = XTRUE;
@@ -184,12 +186,12 @@ static void vnc_proxy_acceptor(xsocket client_xs, void* args) {
     xbool has_none_auth = XFALSE;
 
     vnc_xs = xsocket_new(vnc_host, vnc_port);
-    printf("[info] connecting real VNC server %s:%d\n", xstr_get_cstr(vnc_host), vnc_port);
+    xlog_info("connecting real VNC server %s:%d\n", xstr_get_cstr(vnc_host), vnc_port);
     //printf("[info] socket ptr is %p\n", vnc_xs);
     if (xsocket_connect(vnc_xs) != XSUCCESS) {
-      printf("[info] failed to connect to real VNC server!\n");
+      xlog_info("failed to connect to real VNC server!\n");
     } else {
-      printf("[info] connected to VNC server!\n");
+      xlog_info("connected to VNC server!\n");
     }
 
     // handshake vnc version
@@ -198,18 +200,18 @@ static void vnc_proxy_acceptor(xsocket client_xs, void* args) {
    
     xsocket_read(vnc_xs, buf, 1);
     auth_type_count = buf[0];
-    printf("[info] real VNC server has %d types of auth\n", auth_type_count);
+    xlog_info("real VNC server has %d types of auth\n", auth_type_count);
     xsocket_read(vnc_xs, buf, auth_type_count);
 
     for (i = 0; i < auth_type_count; i++) {
       if (buf[i] == 1) {
         // no auth
         has_none_auth = XTRUE;
-        printf("[info] real VNC server supports none auth\n");
+        xlog_info("real VNC server supports none auth\n");
       } else if (buf[i] == 2) {
         // vnc auth
         has_vnc_auth = XTRUE;
-        printf("[info] real VNC server supports vnc auth\n");
+        xlog_info("real VNC server supports vnc auth\n");
       }
     }
 
@@ -223,7 +225,7 @@ static void vnc_proxy_acceptor(xsocket client_xs, void* args) {
       xsocket_read(vnc_xs, challenge, challenge_size);
 
       rfbDesKey(real_server_auth_key, EN0);
-      printf("[info] auth on real server with keys:\n");
+      printf("auth on real server with keys:\n");
       print_bytes((char *) real_server_auth_key, 8);
 
       for (i = 0; i < challenge_size; i += 8) {
@@ -236,10 +238,10 @@ static void vnc_proxy_acceptor(xsocket client_xs, void* args) {
       // check success
       if (buf[3] != 0) {
         // TODO failure
-        printf("[info] auth failed on real vnc server\n");
+        xlog_error("auth failed on real vnc server\n");
         has_error = XTRUE;
       } else {
-        printf("[info] passed auth on real vnc server\n");
+        xlog_info("passed auth on real vnc server\n");
       }
 
       // redirect auth information to client
@@ -248,9 +250,9 @@ static void vnc_proxy_acceptor(xsocket client_xs, void* args) {
 
     if (has_error == XFALSE) {
       // start forwarding
-      printf("[info] start forwarding...\n");
+      xlog_info("start forwarding...\n");
       xsocket_shortcut(client_xs, vnc_xs);
-      printf("[info] client disconnected\n"); // TODO never reach this line?
+      xlog_info("client disconnected\n"); // TODO never reach this line?
     }
 
     xsocket_delete(vnc_xs);
@@ -267,12 +269,13 @@ static xsuccess start_vnc_proxy_server(xstr bind_addr, int port) {
   xsuccess ret;
   xserver xs = xserver_new(bind_addr, port, backlog, vnc_proxy_acceptor, XUNLIMITED, 'p', NULL);
   if (xs == NULL) {
-    fprintf(stderr, "in start_vnc_proxy_server(): failed to init xserver!\n");
-    return XFAILURE;
+    xlog_error("in start_vnc_proxy_server(): failed to init xserver!\n");
+    ret = XFAILURE;
+  } else {
+    xlog_info("VNC proxy server running on %s:%d\n", xstr_get_cstr(bind_addr), port);
+    ret = xserver_serve(xs);
+    xstr_delete(bind_addr);
   }
-  printf("[info] VNC proxy server running on %s:%d\n", xstr_get_cstr(bind_addr), port);
-  ret = xserver_serve(xs);
-  xstr_delete(bind_addr);
   return ret;
 }
 
@@ -342,7 +345,7 @@ static void* ipc_server(void* args) {
 
   xstr_printf(sock_fn, "vnc_proxy.%d.sock", port);
   if ((sock_fd = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) {
-    perror("error in opening Unix socket: ipc_server()");
+    xlog_error("in opening Unix socket: ipc_server()");
     exit(1);
   }
   local.sun_family = AF_UNIX;
@@ -350,44 +353,44 @@ static void* ipc_server(void* args) {
   unlink(local.sun_path); // make sure the file will be removed when this process exit
   len = strlen(local.sun_path) + sizeof(local.sun_family);
   if (bind(sock_fd, (struct sockaddr *) &local, len) < 0) {
-    perror("failed to bind socket in ipc_server()");
+    xlog_error("failed to bind socket in ipc_server()");
     exit(1);
   }
 
   if (listen(sock_fd, backlog) < 0) {
-    perror("failed to listen in ipc_server()");
+    xlog_error("failed to listen in ipc_server()");
     exit(1);
   }
 
   for (;;) {
     int client_sockfd;
     socklen_t t = sizeof(remote);
-    printf("[info] waiting for ipc connection...\n");
+    xlog_info("waiting for ipc connection...\n");
     if ((client_sockfd = accept(sock_fd, (struct sockaddr *) &remote, &t)) < 0) {
       perror("failed to accept");
       exit(1);
     }
-    printf("[info] got client ipc connection!\n");
+    xlog_info("got client ipc connection!\n");
 
     // no need to split a thread for client connection, since there won't be multiple vnc_proxy_ctl running
 
     strcpy(buf, "This is vnc_proxy\r\n");
     send(client_sockfd, buf, strlen(buf) + 1, 0);
     cnt = recv(client_sockfd, buf, buf_len, 0);
-    printf("[info] got message from client: '%s', size=%d\n", buf, cnt);
+    xlog_info("got message from client: '%s', size=%d\n", buf, cnt);
 
     strcpy(buf, "OK\r\n");
     send(client_sockfd, buf, strlen(buf) + 1, 0);
 
     // NOTE use locks when handling vnc_mapping, if not LIST action
     cnt = recv(client_sockfd, buf, buf_len, 0);
-    printf("[info] got command from client: '%s', size=%d\n", buf, cnt);
+    xlog_info("got command from client: '%s', size=%d\n", buf, cnt);
 
     if (xcstr_startwith_cstr(buf, "list") == XTRUE) {
       // no need to lock the mapping
       int i;
       xstr msg = xstr_new();
-      printf("[info] below is the list of all vnc mapping\n");
+      xlog_info("below is the list of all vnc mapping\n");
       xstr_printf(msg, "%d\n", xvec_size(vnc_mapping));
       for (i = 0; i < xvec_size(vnc_mapping); i++) {
         vnc_map* mapping = xvec_get(vnc_mapping, i);
@@ -419,8 +422,8 @@ static void* ipc_server(void* args) {
         xstr_set_cstr(reply_msg, "success\r\n");
 
         if (xstr_len(new_mapping->new_passwd) == 0) {
-          xstr_set_cstr(reply_msg, "[warning] new password not given, this proxy mapping will be ignored!\r\n");
-          printf("%s", xstr_get_cstr(reply_msg));
+          xstr_set_cstr(reply_msg, "new password not given, this proxy mapping will be ignored!\r\n");
+          xlog_warning("%s", xstr_get_cstr(reply_msg));
         } else {
           // warn if there is alread a mapping with same new passwd (first 8 bytes)
           for (i = 0; i < xvec_size(vnc_mapping); i++) {
@@ -434,8 +437,8 @@ static void* ipc_server(void* args) {
               }
             }
             if (new_pwd[j] == existing_pwd[j] && new_pwd[j] == '\0') {
-              xstr_set_cstr(reply_msg, "[warning] same passwd (first 8 bytes) already exists!\r\n");
-              printf("%s", xstr_get_cstr(reply_msg));
+              xstr_set_cstr(reply_msg, "same passwd (first 8 bytes) already exists!\r\n");
+              xlog_warning("%s", xstr_get_cstr(reply_msg));
             }
           }
         }
@@ -491,7 +494,7 @@ static void* ipc_server(void* args) {
       pthread_mutex_unlock(&vnc_mapping_mutex);
     }
 
-    printf("[info] client disconnected\n");
+    xlog_info("client disconnected\n");
     close(client_sockfd);
   }
   

@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <string.h>
 #include <signal.h>
 #include <pthread.h>
 #include <netinet/in.h>
@@ -8,12 +9,12 @@
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/select.h>
-
+#include <errno.h>
 
 #include "xnet.h"
 #include "xmemory.h"
 #include "xutils.h"
-
+#include "xlog.h"
 
 // if this is set to 1, then xserver.serve will be profiled
 #define PROFILE_XSERVER 1
@@ -50,11 +51,15 @@ xsocket xsocket_new(xstr host, int port) {
   xsock->port = port;
   if (xinet_get_sockaddr(xstr_get_cstr(host), port, &(xsock->addr)) != XSUCCESS) {
     xsocket_delete(xsock);
-    return NULL;
+    xsock = NULL;
   } else {
     xsock->sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    return xsock;
   }
+  return xsock;
+}
+
+int xsocket_get_socket_fd(xsocket xs) {
+  return xs->sockfd;
 }
 
 const char* xsocket_get_host_cstr(xsocket xs) {
@@ -131,7 +136,7 @@ void xsocket_shortcut(xsocket xs1, xsocket xs2) {
     FD_SET(xs1->sockfd, &ex_set);
 
     if (select(maxfdp1, &r_set, &w_set, &ex_set, &time_out) == -1) {
-      printf("[info] select < 0\n");
+      xlog_debug("[info] select < 0\n");
       break;
     }
 
@@ -146,7 +151,7 @@ void xsocket_shortcut(xsocket xs1, xsocket xs2) {
       } else if (cnt == 0) {
         break;  // is this correct?
       } else if (cnt < 0) {
-        printf("[info] sock cnt < 0\n");
+        xlog_debug("[info] sock cnt < 0\n");
         break;
       }
     }
@@ -161,13 +166,13 @@ void xsocket_shortcut(xsocket xs1, xsocket xs2) {
       } else if (cnt == 0) {
         break;
       } else if (cnt < 0) {
-        printf("[info] sock cnt < 0\n");
+        xlog_debug("[info] sock cnt < 0\n");
         break;
       }
     }
 
     if (FD_ISSET(xs1->sockfd, &ex_set) || FD_ISSET(xs2->sockfd, &ex_set)) {
-      printf("[info] sock ex!\n");
+      xlog_debug("[info] sock exception encountered!\n");
       break;
     }
 
@@ -201,16 +206,16 @@ xserver xserver_new(xstr host, int port, int backlog, xserver_acceptor acceptor,
   if (bind(xs->sock->sockfd, (struct sockaddr *) &(xs->sock->addr), sizeof(struct sockaddr)) < 0) {
     perror("error in bind()");
     xserver_delete(xs);
-    return NULL;
+    xs = NULL;
   }
-  if (listen(xs->sock->sockfd, xs->backlog) < 0) {
+  if (xs != NULL && listen(xs->sock->sockfd, xs->backlog) < 0) {
     perror("error in listen()");
     xserver_delete(xs);
-    return NULL;
+    xs = NULL;
   }
 #if PROFILE_XSERVER == 1
   gettimeofday(&end_time, NULL);
-  printf("[prof] creating an xserver took %d, %d (sec, usec)\n", (int) (end_time.tv_sec - start_time.tv_sec), (int) (end_time.tv_usec - start_time.tv_usec));
+  xlog_info("[prof] creating an xserver took %d, %d (sec, usec)\n", (int) (end_time.tv_sec - start_time.tv_sec), (int) (end_time.tv_usec - start_time.tv_usec));
 #endif  // PROFILE_XSERVER
   return xs;
 }
@@ -233,6 +238,7 @@ static void* acceptor_wrapper(void* pthread_arg) {
 
 xsuccess xserver_serve(xserver xs) {
   int serv_count = 0;
+  xsuccess ret = XSUCCESS;
 
   // prevent zombie processes
   if (xs->serv_mode == 'p' || xs->serv_mode == 'P') {
@@ -241,14 +247,19 @@ xsuccess xserver_serve(xserver xs) {
 
   while (xs->serv_count == XUNLIMITED || serv_count < xs->serv_count) {
     struct sockaddr_in client_addr;
-    socklen_t sin_size;
+    socklen_t sin_size = sizeof(client_addr);
     int client_sockfd = accept(xs->sock->sockfd, (struct sockaddr *) &client_addr, &sin_size);
+    if (client_sockfd < 0) {
+      xlog_error("in xserver accept(): errno=%d : %s\n", errno, strerror(errno));
+      xlog_info("params: xs->sock->sockfd = %d\n", xs->sock->sockfd);
+      continue;
+    }
     xsocket client_xs = xmalloc_ty(1, struct xsocket_impl); // xfree'd in acceptor wrapper
 
 #if PROFILE_XSERVER == 1
     struct timeval start_time, end_time;
     gettimeofday(&start_time, NULL);
-#endif
+#endif  // #if PROFILE_XSERVER == 1
 
     client_xs->sockfd = client_sockfd;
     client_xs->addr = client_addr;
@@ -268,13 +279,15 @@ xsuccess xserver_serve(xserver xs) {
       if (pthread_create(&tid, NULL, acceptor_wrapper, (void *) arglist) < 0) {
         perror("error in pthread_create()");
         // TODO handle error creating new thread
-        return XFAILURE;
+        ret = XFAILURE;
+        break;
       }
     } else if (xs->serv_mode == 'p' || xs->serv_mode == 'P') {
       pid_t pid = fork();
       if (pid < 0) {
         perror("error in forking new process");
-        return XFAILURE;
+        ret = XFAILURE;
+        break;
       } else if (pid == 0) {
         // child process
 
@@ -283,13 +296,13 @@ xsuccess xserver_serve(xserver xs) {
 
 #if PROFILE_XSERVER == 1
         gettimeofday(&end_time, NULL);
-        printf("[prof] accepting a client in xserver_xserve took %d, %d (sec, usec)\n", (int) (end_time.tv_sec - start_time.tv_sec), (int) (end_time.tv_usec - start_time.tv_usec));
-#endif
+        xlog_info("[prof] accepting a client in xserver_xserve took %d, %d (sec, usec)\n", (int) (end_time.tv_sec - start_time.tv_sec), (int) (end_time.tv_usec - start_time.tv_usec));
+#endif  // #if PROFILE_XSERVER == 1
 
         xs->acceptor(client_xs, xs->args);
         
         if (xmem_usage(stdout) != 0) {
-          printf("*** [xdk] possible memory leak in xserver's service process!\n");
+          xlog_warning("[xdk] possible memory leak in xserver's service process!\n");
         }
         xsocket_delete(client_xs);
         // exit child process
@@ -312,7 +325,7 @@ xsuccess xserver_serve(xserver xs) {
     }
   }
   xserver_delete(xs); // self destroy
-  return XSUCCESS;
+  return ret;
 }
 
 int xserver_get_port(xserver xs) {

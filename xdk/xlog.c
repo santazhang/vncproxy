@@ -179,8 +179,6 @@ void xlog_start_record(int level) {
       do_log("[level7] ");
       break;
     }
-  } else {
-    fprintf(stderr, "[error] no such logging level: %d\n", level);
   }
 }
 

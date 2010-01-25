@@ -41,6 +41,19 @@ typedef struct xsocket_impl* xsocket;
 */
 xsocket xsocket_new(xstr host, int port);
 
+
+/**
+  @brief
+    Get the socket file descriptor for this xsocket object.
+
+  @param xs
+    The xsocket object.
+
+  @return
+    The file descriptor of xsocket.
+*/
+int xsocket_get_socket_fd(xsocket xs);
+
 /**
   @brief
     Get host address, in c-string.

@@ -24,7 +24,7 @@
     The key whose hash value should be calculated.
 
   @return
-    The hash value of key.
+    The hash value of key. Could be negative.
 */
 typedef int (*xhash_hash)(void* key);
 

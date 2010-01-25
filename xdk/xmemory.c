@@ -63,8 +63,8 @@ xmem_log_table* xmem_log_table_new() {
 }
 
 void xmem_log_table_delete(xmem_log_table* xl) {
-  size_t i;
-  size_t actual_size = (xl->base_size << xl->extend_level) + xl->extend_ptr;
+  int i;
+  int actual_size = (xl->base_size << xl->extend_level) + xl->extend_ptr;
   xmem_log_table_entry* p;
   xmem_log_table_entry* q;
   
@@ -84,6 +84,9 @@ void xmem_log_table_delete(xmem_log_table* xl) {
 // calculates the actuall slot id of a key
 static int xmem_log_table_slot_id(xmem_log_table* xl, void* key) {
   long hcode = (long) key;
+  if (hcode < 0) {
+    hcode = -hcode;
+  }
   if (hcode % (xl->base_size << xl->extend_level) < xl->extend_ptr) {
     // already extended part
     return hcode % (xl->base_size << (1 + xl->extend_level));
@@ -100,7 +103,7 @@ static void xmem_log_table_try_extend(xmem_log_table* xl) {
     xmem_log_table_entry* p;
     xmem_log_table_entry* q;
 
-    size_t actual_size = (xl->base_size << xl->extend_level) + xl->extend_ptr;
+    int actual_size = (xl->base_size << xl->extend_level) + xl->extend_ptr;
 
     xl->slot = (xmem_log_table_entry **) realloc(xl->slot, (actual_size + 1) * sizeof(xmem_log_table_entry *));
     p = xl->slot[xl->extend_ptr];
@@ -125,7 +128,7 @@ static void xmem_log_table_try_extend(xmem_log_table* xl) {
 }
 
 void xmem_log_table_put(xmem_log_table* xl, void* ptr, const char* file, int line) {
-  size_t slot_id;
+  int slot_id;
   xmem_log_table_entry* entry = (xmem_log_table_entry *) malloc(sizeof(xmem_log_table_entry));
 
   // first of all, test if need to expand
@@ -143,7 +146,7 @@ void xmem_log_table_put(xmem_log_table* xl, void* ptr, const char* file, int lin
 }
 
 const char* xmem_log_table_get_file(xmem_log_table* xl, void* ptr) {
-  size_t slot_id = xmem_log_table_slot_id(xl, ptr);
+  int slot_id = xmem_log_table_slot_id(xl, ptr);
 
   xmem_log_table_entry* p;
   xmem_log_table_entry* q;
@@ -159,7 +162,7 @@ const char* xmem_log_table_get_file(xmem_log_table* xl, void* ptr) {
 }
 
 int xmem_log_table_get_line(xmem_log_table* xl, void* ptr) {
-  size_t slot_id = xmem_log_table_slot_id(xl, ptr);
+  int slot_id = xmem_log_table_slot_id(xl, ptr);
 
   xmem_log_table_entry* p;
   xmem_log_table_entry* q;
@@ -248,8 +251,8 @@ int xmem_log_table_size(xmem_log_table* xl) {
 }
 
 void xmem_log_table_visit(xmem_log_table* xl, xmem_log_table_visitor visitor, void* args) {
-  size_t i;
-  size_t actual_size = (xl->base_size << xl->extend_level) + xl->extend_ptr;
+  int i;
+  int actual_size = (xl->base_size << xl->extend_level) + xl->extend_ptr;
   xbool should_continue = XTRUE;
   xmem_log_table_entry* p;
   

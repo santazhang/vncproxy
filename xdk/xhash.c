@@ -69,8 +69,8 @@ xhash xhash_new(xhash_hash arg_hash, xhash_eql arg_eql, xhash_free arg_free) {
 }
 
 void xhash_delete(xhash xh) {
-  size_t i;
-  size_t actual_size = (xh->base_size << xh->extend_level) + xh->extend_ptr;
+  int i;
+  int actual_size = (xh->base_size << xh->extend_level) + xh->extend_ptr;
   xhash_entry* p;
   xhash_entry* q;
   
@@ -89,7 +89,10 @@ void xhash_delete(xhash xh) {
 
 // calculates the actuall slot id of a key
 static int xhash_slot_id(xhash xh, void* key) {
-  size_t hcode = xh->hash_func(key);
+  int hcode = xh->hash_func(key);
+  if (hcode < 0) {
+    hcode = -hcode;
+  }
   if (hcode % (xh->base_size << xh->extend_level) < xh->extend_ptr) {
     // already extended part
     return hcode % (xh->base_size << (1 + xh->extend_level));
@@ -106,15 +109,19 @@ static void xhash_try_extend(xhash xh) {
     xhash_entry* p;
     xhash_entry* q;
 
-    size_t actual_size = (xh->base_size << xh->extend_level) + xh->extend_ptr;
+    int actual_size = (xh->base_size << xh->extend_level) + xh->extend_ptr;
 
     xh->slot = REALLOC(xhash_entry *, xh->slot, actual_size + 1);
     p = xh->slot[xh->extend_ptr];
     xh->slot[xh->extend_ptr] = NULL;
     xh->slot[actual_size] = NULL;
     while (p != NULL) {
-      size_t hcode = xh->hash_func(p->key);
-      size_t slot_id = hcode % (xh->base_size << (1 + xh->extend_level));
+      int hcode = xh->hash_func(p->key);
+      int slot_id;
+      if (hcode < 0) {
+        hcode = -hcode;
+      }
+      slot_id = hcode % (xh->base_size << (1 + xh->extend_level));
       q = p->next;
       p->next = xh->slot[slot_id];
       xh->slot[slot_id] = p;
@@ -131,7 +138,7 @@ static void xhash_try_extend(xhash xh) {
 }
 
 void xhash_put(xhash xh, void* key, void* value) {
-  size_t slot_id;
+  int slot_id;
   xhash_entry* entry = ALLOC(xhash_entry, 1);
 
   // first of all, test if need to expand
@@ -148,7 +155,7 @@ void xhash_put(xhash xh, void* key, void* value) {
 }
 
 void* xhash_get(xhash xh, void* key) {
-  size_t slot_id = xhash_slot_id(xh, key);
+  int slot_id = xhash_slot_id(xh, key);
 
   xhash_entry* p;
   xhash_entry* q;
@@ -240,8 +247,8 @@ int xhash_size(xhash xh) {
 }
 
 void xhash_visit(xhash xh, xhash_visitor visitor, void* args) {
-  size_t i;
-  size_t actual_size = (xh->base_size << xh->extend_level) + xh->extend_ptr;
+  int i;
+  int actual_size = (xh->base_size << xh->extend_level) + xh->extend_ptr;
   xbool should_continue = XTRUE;
   xhash_entry* p;
   
