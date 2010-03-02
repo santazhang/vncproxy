@@ -113,6 +113,33 @@ int xsocket_write(xsocket xs, const void* data, int len);
 */
 int xsocket_read(xsocket xs, void* buf, int max_len);
 
+/**
+  @brief
+    Write a line of text over the xsocket. If the line is not terminated with \\r\\n, another \\r\\n will be sent after the line.
+
+  @param xs
+    The xsocket object.
+  @param line
+    The line which will be written.
+
+  @return
+    Whether the writting is successfull.
+*/
+xsuccess xsocket_write_line(xsocket xs, const char* line);
+
+/**
+  @brief
+    Read a line from socket, the trailing \\r\\n will be trimmed.
+
+  @param xs
+    The xsocket object.
+  @param line
+    The xstr which will contain fetched line.
+
+  @return
+    Whether we have successfully fetched a line.
+*/
+xsuccess xsocket_read_line(xsocket xs, xstr line);
 
 /**
   @brief
