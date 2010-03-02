@@ -75,6 +75,21 @@ void xmd5_delete(xmd5 xm);
 
 /**
   @brief
+    Convert md5 value to cstr.
+
+  @param md5
+    Input value, the md5 hash sum.
+  @param md5_cstr
+    Output value, which will contain the text representation of the md5 value.
+
+  @warning
+    Make sure md5_cstr has got enough size (at least 33 bytes)!
+*/
+void xcrypto_md5_cstr(const unsigned char* md5, char* md5_cstr);
+
+
+/**
+  @brief
     Wrapper around 3rd party sha1 lib.
 */
 struct xsha1_impl;
