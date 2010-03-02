@@ -48,6 +48,22 @@ xsuccess xoption_parse(xoption xopt, int argc, char* argv[]);
 
 /**
   @brief
+    Try to parse the command line args sent to main(), and also load configs from files.
+
+  @param xopt
+    The xoption which will hold the results.
+  @param argc
+    The number of args, as in main().
+  @param argv
+    The array of args, as in main().
+
+  @return
+    Whether the result is successfully parsed.
+*/
+xsuccess xoption_parse_with_xconf(xoption xopt, int argc, char* argv[]);
+
+/**
+  @brief
     Check whether a certain option was given.
 
   @param xopt
@@ -116,5 +132,5 @@ int xoption_get_size(xoption xopt, const char* name);
 */
 void xoption_delete(xoption xopt);
 
-#endif  // #ifdef XDK_XOPTION_H_
+#endif  // #ifndef XDK_XOPTION_H_
 
