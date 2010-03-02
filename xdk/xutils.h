@@ -121,6 +121,22 @@ xsuccess xinet_get_sockaddr(const char* host, int port, struct sockaddr_in* addr
 
 /**
   @brief
+    Split host:port representation.
+
+  @param host_port
+    The host:port representation, in c-string.
+  @param host
+    The host name.
+  @param port
+    The port number. If port is not given in the host_port, its value is untouched.
+
+  @return
+    Whether the host_port is successfully splitted, i.e, if the host_port has correct grammar.
+*/
+xsuccess xinet_split_host_port(const char* host_port, xstr host, int* port);
+
+/**
+  @brief
     Join two segments of file path into a full path.
 
   @param fullpath
