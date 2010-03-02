@@ -90,7 +90,7 @@ xsuccess xbigint_set_double(xbigint xbi, double value);
   -0.9 -> -1 <br>
 
   If the c-string does not have valid format, XFAILURE will be returned, and the xbigint will be set to 0. <br>
- 
+
   Example of supported strings: <br>
   '0', '+0', '-0', '0.0', '-234234', '0.3', '3e3'
 
