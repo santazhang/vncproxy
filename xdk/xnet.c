@@ -29,6 +29,11 @@ struct xsocket_impl {
   int port; ///< @brief The port where the xsocket is bound to.
   struct sockaddr_in addr;  ///< @brief The socket address of this xsocket.
   int sockfd; ///< @brief The file descriptor bound to this xsocket.
+
+  int readline_buf_start; ///< @brief Fetch start position in the readline buffer.
+  int readline_buf_end; ///< @brief Fetch end position (exclusive) in the readline buffer.
+  int readline_buf_size;  ///< @brief Size of the readline buffer.
+  char* readline_buf; ///< @brief The readline buffer.
 };
 
 /**
@@ -49,6 +54,12 @@ xsocket xsocket_new(xstr host, int port) {
   xsocket xsock = xmalloc_ty(1, struct xsocket_impl);
   xsock->host = host;
   xsock->port = port;
+
+  xsock->readline_buf_size = 0;
+  xsock->readline_buf = NULL;
+  xsock->readline_buf_start = 0;
+  xsock->readline_buf_end = 0;
+
   if (xinet_get_sockaddr(xstr_get_cstr(host), port, &(xsock->addr)) != XSUCCESS) {
     xsocket_delete(xsock);
     xsock = NULL;
@@ -80,10 +91,132 @@ int xsocket_write(xsocket xs, const void* data, int len) {
 
 int xsocket_read(xsocket xs, void* buf, int max_len) {
   if (max_len != 0) {
-    return read(xs->sockfd, buf, max_len);
+    // check if needed to read from readline buffer
+    if (xs->readline_buf != NULL && xs->readline_buf_start != xs->readline_buf_end) {
+      int bytes_in_readline_buf = xs->readline_buf_end - xs->readline_buf_start;
+      if (bytes_in_readline_buf >= max_len) {
+        // there is too much data in readline buffer
+        memcpy(buf, xs->readline_buf, max_len);
+        xs->readline_buf_start += max_len;
+        return max_len;
+      } else {
+        // there is not enough data in readline buffer, we have to fetch more from the net
+        int real_cnt = 0;
+        int cnt;
+        memcpy(buf, xs->readline_buf, bytes_in_readline_buf);
+        xs->readline_buf_start = xs->readline_buf_end;
+        real_cnt += bytes_in_readline_buf;
+
+        // read from net
+        cnt = read(xs->sockfd, buf + bytes_in_readline_buf, max_len - bytes_in_readline_buf);
+        if (cnt < 0) {
+          return cnt;
+        } else {
+          real_cnt += cnt;
+          return real_cnt;
+        }
+      }
+    } else {
+      return read(xs->sockfd, buf, max_len);
+    }
   } else {
     return 0;
   }
+}
+
+// NOTE Our read/write line is like FTP, each command ends with \r\n
+// \0 is not sent over the xsocket, since it is not treated as a terminator
+
+xsuccess xsocket_write_line(xsocket xs, const char* line) {
+  xsuccess ret = XSUCCESS;
+  int line_len = strlen(line);
+
+  if (xsocket_write(xs, line, line_len) != line_len) {
+    ret = XFAILURE;
+  } else {
+    // send \r\n, if not contained in line
+    if (!(line[line_len - 2] == '\r' && line[line_len - 1] == '\n')) {
+      if (xsocket_write(xs, "\r\n", 2) != 2) {
+        ret = XFAILURE;
+      }
+    }
+  }
+  return ret;
+}
+
+xsuccess xsocket_read_line(xsocket xs, xstr line) {
+  static const int readline_buf_default_size = 8192;
+  xsuccess ret = XSUCCESS;
+  if (xs->readline_buf == NULL) {
+    // first time calling this function, prepare buffers
+    xs->readline_buf_size = readline_buf_default_size;
+
+    // NOTE We don't use xmalloc here, because this will trigger a false warning on "memeory leak"
+    // Because when forking the service process, we set the mem counter to 0, after the creation of the xsocket.
+    // So everything inside the client_xsocket should not be counted. However, if we use xmalloc here, 
+    // the readline_buf will be counted, which is not what we wanted.
+    xs->readline_buf = (char *) malloc(xs->readline_buf_size);
+    xs->readline_buf_start = 0;
+    xs->readline_buf_end = 0;
+  }
+
+  xstr_set_cstr(line, "");
+  // fetch data from buffer into the req_xstr 
+  for (;;) {
+    if (xs->readline_buf_start == xs->readline_buf_end) {
+      // no data in buffer
+      if (xs->readline_buf_start == xs->readline_buf_size) {
+        // cannot read more data in the buffer, and everything in the buffer has been fetched
+        // in this case, move the start & end pointers back to 0
+        xs->readline_buf_start = 0;
+        xs->readline_buf_end = 0;
+      } else {
+        // could read data into the buffer
+        // TODO use select(), add time out 
+        int cnt = read(xs->sockfd, xs->readline_buf + xs->readline_buf_start, xs->readline_buf_size - xs->readline_buf_start);
+        //printf("cnt = %d\n", cnt);
+        if (cnt <= 0) {
+          // XXX the case cnt == 0 is also considered "failure", I'm not sure if this is good
+          // but if we treat cnt == 0 as "success", then the req could be empty "" when client disconnected
+          // in that case, when handling requests, empty request must be treated as "disconnected" sign
+          ret = XFAILURE;
+          break;
+        } else {
+//        int i;
+//          for (i = 0; i < cnt; i++) {
+//            printf("%c", req_buf[i + buf_start]);
+//          }
+//          printf("\n");
+          xs->readline_buf_end += cnt;
+        }
+      }
+    } else {
+      // buf_start != buf_end, could read data from the buffer
+      int i = xs->readline_buf_start;
+      xbool eol_reached = XFALSE;
+      while (i < xs->readline_buf_end) {
+        if (xs->readline_buf[i] != '\r' && xs->readline_buf[i] != '\n') {
+          xstr_append_char(line, xs->readline_buf[i]);
+          i++;
+        } else {
+          // eat \r
+          i++;
+          if (xs->readline_buf[i] == '\n') {
+            // eat \n
+            i++;
+          }
+          eol_reached = XTRUE;
+          break;
+        }
+      }
+      xs->readline_buf_start = i;
+      if (eol_reached == XTRUE) {
+        break;
+      }
+    }
+  }
+
+  return ret;
 }
 
 xsuccess xsocket_connect(xsocket xs) {
@@ -100,6 +233,10 @@ void xsocket_delete(xsocket xs) {
   // close it in child process (when serving in multi-process)
   close(xs->sockfd);
   xstr_delete(xs->host);
+  if (xs->readline_buf != NULL) {
+    // NOTE use free instead of xfree here, because it is not allocated with xmalloc
+    free(xs->readline_buf);
+  }
   xfree(xs);
 }
 
@@ -261,6 +398,7 @@ xsuccess xserver_serve(xserver xs) {
     gettimeofday(&start_time, NULL);
 #endif  // #if PROFILE_XSERVER == 1
 
+    memset(client_xs, 0, sizeof(struct xsocket_impl));
     client_xs->sockfd = client_sockfd;
     client_xs->addr = client_addr;
     client_xs->port = ntohs(client_addr.sin_port);
