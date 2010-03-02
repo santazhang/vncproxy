@@ -137,7 +137,7 @@ xstr xconf_get_value(xconf xcf, const char* section_name, const char* item_name)
   return ret;
 }
 
-xsuccess xconf_set_calue(xconf xcf, const char* section_name, const char* item_name, const char* value) {
+xsuccess xconf_set_value(xconf xcf, const char* section_name, const char* item_name, const char* value) {
   xsuccess ret = XFAILURE;
   xhash xh = xconf_get_section(xcf, section_name);
   if (xh != NULL) {
