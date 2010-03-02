@@ -7,6 +7,8 @@
 #include "xvec.h"
 #include "xhash.h"
 #include "xutils.h"
+#include "xlog.h"
+#include "xconf.h"
 
 /**
   @brief
@@ -19,7 +21,7 @@ struct xoption_impl {
 };
 
 static void leftover_free(void* ptr) {
-  // do nothing, since ptr is char*
+  // do nothing, since values are given from argv, which is const
 }
 
 static xbool hash_str_eql(void* key1, void* key2) {
@@ -31,12 +33,20 @@ static xbool hash_str_eql(void* key1, void* key2) {
 }
 
 static void opt_free(void* key, void* value) {
-  xfree(key); // key is copy of char*, need to be free'd
-  // value is char*, no need to free
+  // key is copy of char* need to be free'd, but they are left to be free'd in opt_free (same copy of pointer)
+
+  // NOTE The xfree job is left to optlen_free, instead of this function.
+  // This is caused by short options like "-h", which have key 'h', but don't have value.
+  // In this case, xopt->opt hash table does not have an entry for 'h',
+  // but xopt->optlen hash table entry ("h", 0). This means we can always xfree
+  // the pointer to "h", from xopt->optlen hash table. So the key is left to be xfree'd in xoptlen_free.
+  // See add_short_option for details.
+  
+  // value is pointer to const c-string, so they don't need to be free'd
 }
 
 static void optlen_free(void* key, void* value) {
-  // key is copy of char* need to be free'd, but already free'd once in opt_free
+  xfree(key); // key is copy of char*, need to be free'd
   xfree(value); // value is int*, need to be free'd
 }
 
@@ -51,6 +61,7 @@ xoption xoption_new() {
 static void add_long_option(xoption xopt, char* arg) {
   int i;
   int split_idx = -1;
+  int* len = xmalloc_ty(1, int);
   char* key = xmalloc_ty(strlen(arg), char);
   for (i = 0; arg[i] != '\0'; i++) {
     if (arg[i] == '=') {
@@ -63,14 +74,11 @@ static void add_long_option(xoption xopt, char* arg) {
   key[i] = '\0';
   if (split_idx < 0) {
     // no value
-    int* len = xmalloc_ty(1, int);
     *len = 0;
     xhash_put(xopt->optlen, key, len);
-    xhash_put(xopt->opt, key, NULL);
   } else {
     // has value
-    char* val = xmalloc_ty(strlen(arg), char);
-    int* len = xmalloc_ty(1, int);
+    char* val = xmalloc_ty(strlen(arg), char);  // no need to alloc strlen(arg) + 1, since it will not be fully used
     *len = 1;
     xhash_put(xopt->optlen, key, len);
     strcpy(val, arg + split_idx + 1);
@@ -88,6 +96,8 @@ static void add_short_option(xoption xopt, char key_ch, char* value) {
     xhash_put(xopt->opt, key, value);
   } else {
     *len = 0;
+    // NOTE (key,value) pair is not put in xopt->opt in this case,
+    // but they will always be putted into xopt->optlen
   }
   xhash_put(xopt->optlen, key, len);
 }
@@ -120,6 +130,65 @@ xsuccess xoption_parse(xoption xopt, int argc, char* argv[]) {
       // ordinary command line args
       xvec_push_back(xopt->leftover, argv[i]);
     }
+  }
+  return ret;
+}
+
+// helper for converting xconf to xoption
+static xbool xconf_section_visitor(void* key, void* value, void* args) {
+  xoption xopt = (xoption) args;
+  xstr xkey = (xstr) key;
+  xstr xvalue = (xstr) value;
+  if (xoption_get(xopt, xstr_get_cstr(key))) {
+    // duplicate key, use command line args
+    xlog_warning("configuration '%s' already provided on command line, the value provided in configuration file will be ignored!\n", xstr_get_cstr(key));
+  } else {
+    // adapted from "add_long_option"
+    int* len = xmalloc_ty(1, int);
+    char* ckey = xmalloc_ty(xstr_len(xkey) + 1, char);
+    char* cvalue = xmalloc_ty(xstr_len(xvalue) + 1, char);
+    *len = 1;
+    strcpy(ckey, xstr_get_cstr(xkey));
+    strcpy(cvalue, xstr_get_cstr(xvalue));
+    xhash_put(xopt->optlen, ckey, len);
+    xhash_put(xopt->opt, ckey, cvalue);
+  }
+  return XTRUE;
+}
+
+static xsuccess load_xconf_into_xoption(xoption xopt, const char* fname) {
+  xsuccess ret;
+  xconf xcf = xconf_new();
+  xlog_info("loading configuration from file '%s'\n", fname);
+  ret = xconf_load(xcf, fname);
+  if (ret == XSUCCESS) {
+    xhash xh = xconf_get_section(xcf, NULL);
+    xhash_visit(xh, xconf_section_visitor, xopt);
+  } else {
+    xlog_error("configuration file '%s' not found\n", fname);
+  }
+  xconf_delete(xcf);
+  return ret;
+}
+
+xsuccess xoption_parse_with_xconf(xoption xopt, int argc, char* argv[]) {
+  xsuccess ret = xoption_parse(xopt, argc, argv);
+  int i;
+  if (ret == XSUCCESS) {
+    for (i = 0; i < xvec_size(xopt->leftover) && ret == XSUCCESS; i++) {
+      const char* opt_name = (const char *) xvec_get(xopt->leftover, i);
+      if (opt_name[0] == '@') {
+        xvec_remove(xopt->leftover, i); // the @blah is replaced by configs inside config file
+        ret = load_xconf_into_xoption(xopt, opt_name + 1);
+      }
+    }
+    /*
+    // show debug info
+    for (i = 0; i < xvec_size(xopt->leftover); i++) {
+      const char* opt_name = (const char *) xvec_get(xopt->leftover, i);
+      printf("%s\n", opt_name);
+    }
+    */
   }
   return ret;
 }
