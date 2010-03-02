@@ -32,6 +32,14 @@ void xmd5_delete(xmd5 xm) {
   xfree(xm);
 }
 
+void xcrypto_md5_cstr(const unsigned char* md5, char* md5_cstr) {
+  int i;
+  for (i = 0; i < 16; i++) {
+    sprintf(md5_cstr, "%02x", md5[i]);
+    md5_cstr += 2;
+  }
+}
+
 /**
   @brief
     Wrapper around 3rd party sha1 lib.
