@@ -121,7 +121,7 @@ xsuccess xinet_ip2str(int ip, char* str) {
   char seg_str[4];
   str[0] = '\0';
 
-  // TODO big endian? small endian?
+  // TODO big endian? little endian?
   for (i = 3; i >= 0; i--) {
     int seg = p[i];
     xitoa(seg, seg_str, 10);
@@ -148,6 +148,27 @@ xsuccess xinet_get_sockaddr(const char* host, int port, struct sockaddr_in* addr
   }
   addr->sin_port = htons(port);
   return XSUCCESS;
+}
+
+xsuccess xinet_split_host_port(const char* host_port, xstr host, int* port) {
+  xsuccess ret = XSUCCESS;
+  int i;
+  xstr_set_cstr(host, "");
+  for (i = 0; host_port[i] != '\0' && host_port[i] != ':'; i++) {
+    xstr_append_char(host, host_port[i]);
+  }
+  if (host_port[i] == ':') {
+    int j;
+    // check if there is only '0-9' after the ':'
+    for (j = i + 1; '0' <= host_port[j] && host_port[j] <= '9'; j++) {
+    }
+    if (host_port[j] != '\0') {
+      ret = XFAILURE;
+    } else {
+      *port = atoi(host_port + i + 1);
+    }
+  }
+  return ret;
 }
 
 void xjoin_path_cstr(xstr fullpath, const char* current_dir, const char* append_dir) {
