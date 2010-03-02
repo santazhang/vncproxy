@@ -6,5 +6,5 @@ const char* xsys_fs_sep_cstr = "\\";
 #else
 const char xsys_fs_sep_char = '/';
 const char* xsys_fs_sep_cstr = "/";
-#endif  // #ifdef WIN32
+#endif  // #ifdef WIN32_
 
