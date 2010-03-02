@@ -30,7 +30,7 @@ def depended_obj file
   obj_list = visited.map do |header|
     "obj/#{header[0..-3]}.o"
   end
-
+  obj_list = obj_list.sort
   return obj_list
 end
 
@@ -58,11 +58,12 @@ def depended_header file
     end
   end
   list = list.uniq
+  list = list.sort
   return list
 end
 
 def all_targets_in_module mod
-  depend = {mod => ["bin", "obj"]}
+  depend = {mod => []}
   action = {mod => []}
 
   all_obj_list = []
@@ -80,7 +81,7 @@ def all_targets_in_module mod
 
         depend[bin_name] = [] if depend[bin_name] == nil
         depend[bin_name] << obj_name
-        depend[bin_name] << (depended_obj path)
+        depend[bin_name].concat(depended_obj path)
 
         action[bin_name] = [] if action[bin_name] == nil
         action[bin_name] << "$(CC) $(CFLAGS) $(LDFLAGS) #{obj_name} #{(depended_obj path).join " "} -o #{bin_name}"
@@ -90,7 +91,7 @@ def all_targets_in_module mod
 
       depend[obj_name] = [] if depend[obj_name] == nil
       depend[obj_name] << path
-      depend[obj_name] << (depended_header path)
+      depend[obj_name].concat(depended_header path)
 
       action[obj_name] = [] if action[obj_name] == nil
       action[obj_name] << "$(CC) $(CFLAGS) -c #{path} -o #{obj_name}"
@@ -125,6 +126,7 @@ def all_targets_in_module mod
     action[run_mod] << "@echo #{"=" * (echo_info.length - 2)}"
 
     test_case_counter = 1
+    all_bin_list = all_bin_list.sort
     all_bin_list.each do |e|
       echo_info =  "#{test_case_counter} of #{all_bin_list.length}: Running test case \\'#{File.basename e}\\'"
       action[run_mod] << "@echo #{echo_info}"
@@ -137,12 +139,20 @@ def all_targets_in_module mod
   end
 
   content = ""
-  depend.keys.each do |target|
+  depend.keys.sort.each do |target|
+    depend[target] = depend[target].sort
     $g_depend[target] = depend[target]
-    content += <<CONTENT
+    if BUILD_MODULES.include? target
+      content += <<CONTENT
+#{target}: bin obj #{depend[target].join " "}
+#{action[target].collect {|act| "\t#{act}\n"}}
+CONTENT
+    else
+      content += <<CONTENT
 #{target}: #{depend[target].join " "}
 #{action[target].collect {|act| "\t#{act}\n"}}
 CONTENT
+    end
   end
 
   return content
@@ -150,13 +160,13 @@ end
 
 def gen_make_targets
   content = ""
-  BUILD_MODULES.each do |mod|
+  BUILD_MODULES.sort.each do |mod|
     content += all_targets_in_module mod
     content += "\n"
   end
 
   content += "all: bin obj #{LIB_MODULES.collect {|mod| "bin/lib#{mod}.a "}}"
-  $g_depend.keys.each do |target|
+  $g_depend.keys.sort.each do |target|
     if target =~ /\.o$/ or target =~ /^bin\//
       content += target + " "
     end
@@ -171,7 +181,7 @@ $g_all_src_files = nil
 def all_src_files
   return $g_all_src_files if $g_all_src_files != nil
   $g_all_src_files = []
-  BUILD_MODULES.each do |mod|
+  BUILD_MODULES.sort.each do |mod|
     Find.find(mod) do |path|
       if FileTest.directory? path
         # do nothing
@@ -186,7 +196,7 @@ end
 #return a list of all directories in source folders
 def mk_obj_dirs_list
   list = []
-  BUILD_MODULES.each do |mod|
+  BUILD_MODULES.sort.each do |mod|
     Find.find(mod) do |path|
       if FileTest.directory? path
         list << path
@@ -253,6 +263,45 @@ def warn_bad_style
       next if should_skip
     end
 
+    # check if used tabs in spacing
+    File.open(path) do |f|
+      row = 1
+      f.each_line do |line|
+        if line =~ /^[ ]*\t/
+          puts "style warning: #{path}, #{row}: please don't use tab for spacing"
+        end
+        row += 1
+      end
+    end
+
+    # check if has #ifndef guard
+    if path.end_with? ".h"
+      File.open(path) do |f|
+        has_guard = false
+        guard_name = nil
+        f.each_line do |line|
+          if guard_name == nil
+            if line =~ /^\#ifndef.*_H_$/
+              guard_name = line.split[-1]
+            end
+          else
+            # last line is #ifndef, so this line must be #define
+            if line =~ /^\#define/ and line.include? guard_name
+              has_guard = true
+              break
+            else
+              guard_name = nil
+            end
+          end
+
+        end
+
+        if has_guard == false
+          puts "style warning: #{path}, no #ifndef guard found!"
+        end
+      end
+    end
+
     # check if #endif are followed by comments
     File.open(path) do |f|
       row = 1
@@ -263,6 +312,28 @@ def warn_bad_style
           end
         end
         row += 1
+      end
+    end
+
+    # check if .h files have got @author, @file tags
+    if path.end_with? ".h"
+      has_author_tag = false
+      has_file_tag = false
+      File.open(path) do |f|
+        f.each_line do |line|
+          if line =~ /@author/
+            has_author_tag = true
+          end
+          if line =~ /@file/
+            has_file_tag = true
+          end
+        end
+      end
+      if has_author_tag == false
+        puts "style warning: #{path}, does not have @author tag!"
+      end
+      if has_file_tag == false
+        puts "style warning: #{path}, does not have @file tag"
       end
     end
 
@@ -310,7 +381,6 @@ task :check do
   puts "No duplicate file name"
   assert_src_header_pair
   puts "All .c files either has got a .h file, or they have main() entry"
-# TODO style checking
   puts "Finished checking"
 end
 
@@ -369,20 +439,20 @@ LDFLAGS=-lpthread -lm
 default: bin obj #{DEFAULT_BUILD_MODULES.collect {|mod| mod + " "}}
 
 bin:
-	mkdir -p bin
+	md bin
 
 obj:
-#{mk_obj_dirs_list.collect {|dir| "\tmkdir -p obj/#{dir}\n"}}
+#{mk_obj_dirs_list.collect {|dir| "\tmd obj/#{dir}\n"}}
 
 api: #{all_src_files.collect {|f| f + " "}}
 	doxygen
 
 clean:
-	rm -rf bin
-	rm -rf obj
-	rm -rf api
-	rm -f *.log
-	find . -iname *~ -delete
+	rd /S /Q bin
+	rd /S /Q obj
+	rd /S /Q api
+	for /r %f in (*.log) do del "%f"
+	for /r %f in (*~) do del "%f"
 
 #{gen_make_targets}
 
@@ -394,7 +464,9 @@ end
 
 desc "Run all test cases"
 task :test do
-  system "make test"
+  TEST_MODULES.each do |mod|
+    system "make #{mod}"
+  end
   result = {}
   TEST_MODULES.each do |mod|
     Find.find(mod) do |f|
@@ -421,6 +493,14 @@ task :test do
   puts "\n-- failure:\n"
   result.each do |k, v|
     puts "* #{k}" if v == false
+  end
+end
+
+desc "Show all notes like TODO, ENHANCE, etc"
+task :notes do
+  ["TODO", "NOTE", "ENHANCE", "XXX", "FIXME"].each do |note|
+    system "grep #{note} * -r -n --color"
+    puts
   end
 end
 
