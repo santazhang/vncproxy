@@ -174,10 +174,26 @@ int xstr_printf(xstr xs, const char* fmt, ...) {
 xbool xstr_startwith_cstr(xstr xs, const char* head) {
   int i;
   for (i = 0; xs->str[i] != '\0' && head[i] != '\0'; i++) {
-    if (xs->str[i] != head[i])
+    if (xs->str[i] != head[i]) {
       return XFALSE;
+    }
   }
   return head[i] == '\0';
+}
+
+xbool xstr_endwith_cstr(xstr xs, const char* tail) {
+  int i;
+  int tail_len = strlen(tail);
+  int xs_len = xstr_len(xs);
+  if (tail_len > xs_len) {
+    return XFALSE;
+  }
+  for (i = 0; i < tail_len; i++) {
+    if (xs->str[xs_len - i - 1] != tail[tail_len - i - 1]) {
+      return XFALSE;
+    }
+  }
+  return XTRUE;
 }
 
 xstr xstr_copy(xstr orig) {

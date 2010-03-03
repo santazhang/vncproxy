@@ -132,6 +132,20 @@ xbool xstr_startwith_cstr(xstr xs, const char* head);
 
 /**
   @brief
+    Test if an xstr ends with a c-string.
+
+  @param xs
+    The xstring to be tested.
+  @param tail
+    The cstring which might be the tail.
+
+  @return
+    XTRUE or XFALSE.
+*/
+xbool xstr_endwith_cstr(xstr xs, const char* tail);
+
+/**
+  @brief
     Deeply copy an xstr object.
 
   @param orig
