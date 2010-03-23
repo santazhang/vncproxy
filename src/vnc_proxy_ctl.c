@@ -12,6 +12,12 @@
 #include "xutils.h"
 #include "xstr.h"
 
+// global socket file name. if it is not NULL, then we could just use it, otherwise we look for socket file in
+// working dir.
+char* g_sock_fn_cstr = NULL;
+
+// whether we should show minimal info for "list" action
+xbool g_quiet_listing = XTRUE;
 
 int connect_server() {
   int sockfd = -1;
@@ -24,18 +30,25 @@ int connect_server() {
   int cnt;
   int buf_len = 8192;
   char* buf = xmalloc_ty(buf_len, char);
-  
-  while ((p_dirent = readdir(p_dir)) != NULL) {
-    lstat(p_dirent->d_name, &st);
-    if (S_ISSOCK(st.st_mode)) {
-      printf("[info] found socket %s\n", p_dirent->d_name);
-      if (xstr_len(sock_fn) > 0) {
-        printf("[error] multiple socket found!\n");
-        exit(1);
-      } else {
-        xstr_set_cstr(sock_fn, p_dirent->d_name);
+
+  if (g_sock_fn_cstr == NULL) {
+    // socket file not given in cmdline, find it in working dir
+    while ((p_dirent = readdir(p_dir)) != NULL) {
+      lstat(p_dirent->d_name, &st);
+      if (S_ISSOCK(st.st_mode)) {
+        printf("[info] found socket %s\n", p_dirent->d_name);
+        if (xstr_len(sock_fn) > 0) {
+          printf("[error] multiple socket found!\n");
+          exit(1);
+        } else {
+          xstr_set_cstr(sock_fn, p_dirent->d_name);
+          // don't break now, we have to check if there are multiple sock files.
+        }
       }
     }
+  } else {
+    // socket file already given, use it directly
+    xstr_set_cstr(sock_fn, g_sock_fn_cstr);
   }
 
   if ((sockfd = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) {
@@ -51,10 +64,10 @@ int connect_server() {
     exit(1);
   }
 
-  printf("[info] connected\n");
+  //printf("[info] connected\n");
 
   cnt = recv(sockfd, buf, buf_len, 0);
-  printf("[info] got message from server: '%s', size=%d\n", buf, cnt);
+  //printf("[info] got message from server: '%s', size=%d\n", buf, cnt);
 
   strcpy(buf, "This is vnc_proxy_ctl\r\n");
   send(sockfd, buf, strlen(buf) + 1, 0);
@@ -147,7 +160,9 @@ xsuccess del_vnc_proxy_by_dest(xstr vnc_host, int vnc_port) {
 
 void list_vnc_proxy() {
   int sockfd = connect_server();
-  printf("[info] list\n");
+  if (g_quiet_listing == XFALSE) {
+    printf("[info] list\n");
+  }
   if (sockfd > 0) {
     int buf_len = 8192;
     char* buf = xmalloc_ty(buf_len, char);
@@ -162,7 +177,9 @@ void list_vnc_proxy() {
       xstr_append_cstr(msg, buf);
     }
 
-    printf("[info] recv'ed from server:\n");
+    if (g_quiet_listing == XFALSE) {
+      printf("[info] recv'ed from server:\n");
+    }
     printf("%s\n", xstr_get_cstr(msg));
 
     close(sockfd);
@@ -186,9 +203,11 @@ int main(int argc, char* argv[]) {
     }
   }
   if (argc == 1 || ask_for_help == XTRUE) {
-    printf("usage: vnc_proxy_ctl add [-p <new password>|--password=<new password>] [-op <old password>|--old-password=<old password>] -d <dest>|--dest=<dest>\n");
-    printf("       vnc_proxy_ctl del [-p <new password>|--password=<new password>] [-d <dest>|--dest=<dest_ip>[:dest_port]]\n");
-    printf("       vnc_proxy_ctl list\n");
+    printf("usage: vnc_proxy_ctl add [-p <new password>|--password=<new password>] [-op <old password>|--old-password=<old password>] -d <dest>|--dest=<dest> [-s socket_fn]\n");
+    printf("       vnc_proxy_ctl del [-p <new password>|--password=<new password>] [-d <dest>|--dest=<dest_ip>[:dest_port]] [-s socket_fn]\n");
+    printf("       vnc_proxy_ctl list [-s socket_fn] [-v]\n");
+    printf("       'socket_fn' is the path to the socket file of vnc_proxy.\n");
+    printf("       for 'list' action, add '-v' to show more info.\n");
     exit(0);
   }
     
@@ -216,9 +235,19 @@ int main(int argc, char* argv[]) {
         xstr_set_cstr(dest_addr, argv[i + 1]);
       } else {
         printf("error in cmdline args: '-d' must be followed by destination address!\n");
+        exit(1);
       }
     } else if (xcstr_startwith_cstr(argv[i], "--dest=")) {
       xstr_set_cstr(dest_addr, argv[i] + 7);
+    } else if (strcmp(argv[i], "-s") == 0) {
+      if (i + 1 < argc) {
+        g_sock_fn_cstr = argv[i + 1];
+      } else {
+        printf("error in cmdline args: '-s' must be followed by socket file path!\n");
+        exit(1);
+      }
+    } else if (strcmp(argv[i], "-v") == 0) {
+      g_quiet_listing = XFALSE;
     }
   }
 
