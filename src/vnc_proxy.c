@@ -8,6 +8,7 @@
 #include <sys/un.h>
 #include <pthread.h>
 #include <errno.h>
+#include <signal.h>
 
 #include "xstr.h"
 #include "xnet.h"
@@ -332,8 +333,10 @@ static void parse_vnc_mapping(char* str, vnc_map* mapping) {
   }
 }
 
-static void* ipc_server(void* args) {
-  int port = *(int *) args;
+static void* ipc_server(void* arg) {
+  void** args = (void **) arg;
+  int port = *(int *) args[0];
+  char* sock_fn_cstr = (char *) args[1];
   struct sockaddr_un local, remote;
   int sock_fd;
   xstr sock_fn = xstr_new();
@@ -343,7 +346,11 @@ static void* ipc_server(void* args) {
   char* buf = xmalloc_ty(buf_len, char);
   int cnt;
 
-  xstr_printf(sock_fn, "vnc_proxy.%d.sock", port);
+  if (sock_fn_cstr == NULL) {
+    xstr_printf(sock_fn, "vnc_proxy.%d.sock", port);
+  } else {
+    xstr_set_cstr(sock_fn, sock_fn_cstr);
+  }
   if ((sock_fd = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) {
     xlog_error("in opening Unix socket: ipc_server()");
     exit(1);
@@ -418,12 +425,15 @@ static void* ipc_server(void* args) {
       pthread_mutex_lock(&vnc_mapping_mutex);
 
       if (xcstr_startwith_cstr(buf, "add") == XTRUE) {
+        xsuccess success = XSUCCESS;
         xstr reply_msg = xstr_new();
         xstr_set_cstr(reply_msg, "success\r\n");
 
         if (xstr_len(new_mapping->new_passwd) == 0) {
           xstr_set_cstr(reply_msg, "new password not given, this proxy mapping will be ignored!\r\n");
-          xlog_warning("%s", xstr_get_cstr(reply_msg));
+          xlog_error("%s", xstr_get_cstr(reply_msg));
+          xstr_set_cstr(reply_msg, "failure\r\n");
+          success = XFAILURE;
         } else {
           // warn if there is alread a mapping with same new passwd (first 8 bytes)
           for (i = 0; i < xvec_size(vnc_mapping); i++) {
@@ -437,12 +447,17 @@ static void* ipc_server(void* args) {
               }
             }
             if (new_pwd[j] == existing_pwd[j] && new_pwd[j] == '\0') {
-              xstr_set_cstr(reply_msg, "same passwd (first 8 bytes) already exists!\r\n");
-              xlog_warning("%s", xstr_get_cstr(reply_msg));
+              xstr_set_cstr(reply_msg, "same passwd (first 8 bytes) already exists! just ignore!\r\n");
+              xlog_error("%s", xstr_get_cstr(reply_msg));
+              xstr_set_cstr(reply_msg, "failure\r\n");
+              success = XFAILURE;
+              break;
             }
           }
         }
-        xvec_push_back(vnc_mapping, new_mapping);
+        if (success == XSUCCESS) {
+          xvec_push_back(vnc_mapping, new_mapping);
+        }
         send(client_sockfd, xstr_get_cstr(reply_msg), xstr_len(reply_msg) + 1, 0);
         xstr_delete(reply_msg);
       } else if (xcstr_startwith_cstr(buf, "del.dest") == XTRUE) {
@@ -499,16 +514,20 @@ static void* ipc_server(void* args) {
   }
   
   xfree(buf);
+  xfree(args[0]); // args[0] is an int*
   xfree(args);
   xstr_delete(sock_fn);
   return NULL;
 }
 
-static void start_ipc_server(int port) {
+static void start_ipc_server(int port, char* sock_fn) {
   pthread_t tid;
   int* port_copy = xmalloc_ty(1, int);
   *port_copy = port;
-  if (pthread_create(&tid, NULL, ipc_server, (void *) port_copy) < 0) {
+  void** args = xmalloc_ty(2, void *);
+  args[0] = port_copy;
+  args[1] = sock_fn;
+  if (pthread_create(&tid, NULL, ipc_server, (void *) args) < 0) {
     perror("error in pthread_create()");
   }
 }
@@ -517,7 +536,9 @@ int main(int argc, char* argv[]) {
   xstr bind_addr = xstr_new();
   int port = 5900;
   int i;
+  char* sock_fn = NULL;  // optional socket file name, if it is set to NULL, the socket filename will be automatically determined
   xbool ask_for_help = XFALSE;
+  char* pid_fn = NULL;
 
   for (i = 1; i < argc; i++) {
     if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
@@ -526,9 +547,11 @@ int main(int argc, char* argv[]) {
   }
 
   if (ask_for_help) {
-    printf("usage: vnc_proxy [-b bind_addr] [-p bind_port]\n");
+    printf("usage: vnc_proxy [-b bind_addr] [-p bind_port] [-s socket_file] [-pf pid_file]\n");
     printf("       bind_addr is default to 0.0.0.0\n");
     printf("       bind_port is default to 5900\n");
+    printf("       socket_file is optional\n");
+    printf("       if '-p' given, the process will work as a daemon.\n");
     printf("\n");
     printf("You need to use vnc_proxy_ctl to change proxy settings\n");
     exit(0);
@@ -560,17 +583,62 @@ int main(int argc, char* argv[]) {
     } else if (xcstr_startwith_cstr(argv[i], "--bind=")) {
       // TODO check ip address format
       xstr_set_cstr(bind_addr, argv[i] + 7);
+    } else if (strcmp(argv[i], "-s") == 0) {
+      if (i + 1 < argc) {
+        sock_fn = argv[i + 1];
+      } else {
+        printf("error in cmdline args: '-s' must be followed by socket file name!\n");
+        exit(1);
+      }
+    } else if (strcmp(argv[i], "-pf") == 0) {
+      if (i + 1 < argc) {
+        pid_fn = argv[i + 1];
+      } else {
+        printf("error in cmdline args: '-pf' must be followed by pid file path!\n");
+        exit(1);
+      }
     }
   }
 
   printf("If you need help, use: 'vnc_proxy -h' or 'vnc_proxy --help'\n");
 
-  // TODO prepare the vnc mapping hash table
-  vnc_mapping = xvec_new(vnc_mapping_free);
+  if (pid_fn == NULL) {
+    // prepare the vnc mapping hash table
+    vnc_mapping = xvec_new(vnc_mapping_free);
 
-  // ipc server is started in a new thread
-  start_ipc_server(port);
+    // ipc server is started in a new thread
+    start_ipc_server(port, sock_fn);
 
-  return start_vnc_proxy_server(bind_addr, port);
+    return start_vnc_proxy_server(bind_addr, port);
+  } else {
+    int pid;
+    // prevent zombies
+    signal(SIGCHLD, SIG_IGN);
+
+    pid = fork();
+    if (pid == 0) {
+      // child process, do work
+
+      // write pid file
+      FILE *fp = fopen(pid_fn, "w");
+      if (fp == NULL) {
+        printf("error: failed to open pid file '%s'!\n", pid_fn);
+        exit(1);
+      }
+      fprintf(fp, "%d", getpid());
+      fclose(fp);
+
+      // prepare the vnc mapping hash table
+      vnc_mapping = xvec_new(vnc_mapping_free);
+
+      // ipc server is started in a new thread
+      start_ipc_server(port, sock_fn);
+
+      return start_vnc_proxy_server(bind_addr, port);
+    } else {
+      // parent process, end here
+      return 0;
+    }
+  }
 }
 
