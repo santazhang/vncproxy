@@ -252,7 +252,7 @@ static void vnc_proxy_acceptor(xsocket client_xs, void* args) {
     if (has_error == XFALSE) {
       // start forwarding
       xlog_info("start forwarding...\n");
-      xsocket_shortcut(client_xs, vnc_xs);
+      xsocket_shortcut(client_xs, vnc_xs, 1000);
       xlog_info("client disconnected\n"); // TODO never reach this line?
     }
 
