@@ -240,7 +240,7 @@ void xsocket_delete(xsocket xs) {
   xfree(xs);
 }
 
-void xsocket_shortcut(xsocket xs1, xsocket xs2) {
+void xsocket_shortcut(xsocket xs1, xsocket xs2, int sleep_usec) {
   fd_set r_set;
   fd_set w_set;
   fd_set ex_set;
@@ -249,6 +249,11 @@ void xsocket_shortcut(xsocket xs1, xsocket xs2) {
   const int buf_len = 8192;
   char* buf = xmalloc_ty(buf_len, char);
   int cnt;
+
+  // make sure the sleeping time is valid (positive)
+  if (sleep_usec < 1) {
+    sleep_usec = 1;
+  }
 
   if (xs1->sockfd + 1 > maxfdp1) {
     maxfdp1 = xs1->sockfd + 1;
@@ -315,7 +320,7 @@ void xsocket_shortcut(xsocket xs1, xsocket xs2) {
 
     if (has_activity == XFALSE) {
       // if no data was sent, sleep for a very short time, prevent high CPU usage
-      usleep(1);
+      usleep(sleep_usec);
     }
   }
   xfree(buf);
