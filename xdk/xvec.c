@@ -58,6 +58,7 @@ int xvec_put(xvec xv, int index, void* data) {
   if (index == xv->size) {
     xv->size++; // append new data
   } else {
+    // release old data
     xv->xvfree(xv->data[index]);
   }
   xv->data[index] = data;
