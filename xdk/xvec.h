@@ -87,6 +87,7 @@ void* xvec_get(xvec xv, int index);
     And you should know that old data will be overwritten by new data!
     What's more, keep in mind that the data is not deeply copied into xvec object,
     only the data pointer's value will be put into xvec's internal data structure!
+    Also, note that the old data will be free'd!
 
   @return
     New data's index on success.
@@ -126,6 +127,7 @@ int xvec_insert(xvec xv, int index, void* data);
 
   @warning
     Make sure index is in range!
+    Also, the removed object will be free'd.
 
   @return
     The value of index if success.

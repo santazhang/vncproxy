@@ -57,6 +57,8 @@ int xvec_put(xvec xv, int index, void* data) {
   ensure_max_size(xv, index + 1);
   if (index == xv->size) {
     xv->size++; // append new data
+  } else {
+    xv->xvfree(xv->data[index]);
   }
   xv->data[index] = data;
   return index;

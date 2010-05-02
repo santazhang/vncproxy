@@ -188,6 +188,9 @@ void xlog_end_record(const char* fmt) {
   if (fmt[strlen(fmt) - 1] != '\n') {
     do_log("\n");
   }
+  if (log_screenonly != XTRUE && log_fp != NULL) {
+    fflush(log_fp);
+  }
   // prevent 2 thread from logging concurrently, which will mess up the log file
   pthread_mutex_unlock(&logging_lock);
 }
