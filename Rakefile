@@ -400,7 +400,7 @@ task :gen => :check do
 # Automatically generated at #{Time.now}
 
 CC=gcc
-CFLAGS=-ggdb -Wall #{BUILD_MODULES.collect {|mod| "-I#{mod} "}} -D_FILE_OFFSET_BITS=64
+CFLAGS=-ggdb -pthread -Wall #{BUILD_MODULES.collect {|mod| "-I#{mod} "}} -D_FILE_OFFSET_BITS=64
 LDFLAGS=-lpthread -lm
 
 default: bin obj #{DEFAULT_BUILD_MODULES.collect {|mod| mod + " "}}
@@ -444,7 +444,7 @@ MF_EOF
 # Automatically generated at #{Time.now}
 
 CC=gcc
-CFLAGS=-ggdb -Wall #{BUILD_MODULES.collect {|mod| "-I#{mod} "}} -D_FILE_OFFSET_BITS=64
+CFLAGS=-ggdb -pthread -Wall #{BUILD_MODULES.collect {|mod| "-I#{mod} "}} -D_FILE_OFFSET_BITS=64
 LDFLAGS=-lpthread -lm
 
 default: bin obj #{DEFAULT_BUILD_MODULES.collect {|mod| mod + " "}}
