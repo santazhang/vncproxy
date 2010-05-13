@@ -98,7 +98,7 @@ def all_targets_in_module mod
     end
   end
 
-  if LIB_MODULES.include? mod
+  if defined? LIB_MODULES and LIB_MODULES.include? mod
     # make .a file
     lib_name = "bin/lib#{mod}.a"
     depend[mod] << lib_name
@@ -112,7 +112,7 @@ def all_targets_in_module mod
     action[lib_name] << ""
   end
 
-  if TEST_MODULES.include? mod
+  if defined? TEST_MODULES and TEST_MODULES.include? mod
     # add a run#{mod} target
     run_mod = "run#{mod}"
     depend[run_mod] = [] if depend[run_mod] == nil
@@ -165,7 +165,7 @@ def gen_make_targets
     content += "\n"
   end
 
-  content += "all: bin obj #{LIB_MODULES.collect {|mod| "bin/lib#{mod}.a "}}"
+  content += "all: bin obj #{LIB_MODULES.collect {|mod| "bin/lib#{mod}.a "} if defined? LIB_MODULES}"
   $g_depend.keys.sort.each do |target|
     if target =~ /\.o$/ or target =~ /^bin\//
       content += target + " "
@@ -205,14 +205,18 @@ def mk_obj_dirs_list
   end
   list = list.sort
   min_list = []
-  (0..(list.length - 2)).each do |idx|
-    a = list[idx]
-    b = list[idx + 1]
-    if (b.start_with? a) == false
-      min_list << a
-    end
-    if idx == list.length - 2
-      min_list << b
+  if list.length < 2
+    min_list = list
+  else
+    (0..(list.length - 2)).each do |idx|
+      a = list[idx]
+      b = list[idx + 1]
+      if (b.start_with? a) == false
+        min_list << a
+      end
+      if idx == list.length - 2
+        min_list << b
+      end
     end
   end
   return min_list
