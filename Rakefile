@@ -12,7 +12,7 @@ def has_main_entry? file
 end
 
 # finds all depended obj file, including inherit dependency
-def depended_obj file
+def depended_obj file, build_mode
   visited = []
   not_visited = depended_header file
   
@@ -28,7 +28,7 @@ def depended_obj file
   end
 
   obj_list = visited.map do |header|
-    "obj/#{header[0..-3]}.o"
+    (my_join "-", ["obj", build_mode]) + "/#{header[0..-3]}.o"
   end
   obj_list = obj_list.sort
   return obj_list
@@ -62,7 +62,7 @@ def depended_header file
   return list
 end
 
-def all_targets_in_module mod
+def all_targets_in_module mod, build_mode
   depend = {mod => []}
   action = {mod => []}
 
@@ -72,19 +72,19 @@ def all_targets_in_module mod
   Find.find(mod) do |path|
     next if FileTest.directory? path
     if path =~ /\.c$/
-      obj_name = "obj/#{path[0..-3] + ".o"}"
+      obj_name = (my_join "-", ["obj", build_mode]) + "/#{path[0..-3] + ".o"}"
       all_obj_list << obj_name
       if has_main_entry? path
-        bin_name = "bin/#{(File.basename path)[0..-3]}"
+        bin_name = (my_join "-", ["bin", build_mode]) + "/#{(File.basename path)[0..-3]}"
         all_bin_list << bin_name
         depend[mod] << bin_name
 
         depend[bin_name] = [] if depend[bin_name] == nil
         depend[bin_name] << obj_name
-        depend[bin_name].concat(depended_obj path)
+        depend[bin_name].concat(depended_obj path, build_mode)
 
         action[bin_name] = [] if action[bin_name] == nil
-        action[bin_name] << "$(CC) $(CFLAGS) $(LDFLAGS) #{obj_name} #{(depended_obj path).join " "} -o #{bin_name}"
+        action[bin_name] << "$(#{my_join "_", ["CC", build_mode]}) $(#{my_join "_", ["CFLAGS", build_mode]}) $(#{my_join "_", ["LDFLAGS", build_mode]}) #{obj_name} #{(depended_obj path, build_mode).join " "} -o #{bin_name}"
       end
 
       depend[mod] << obj_name
@@ -94,13 +94,13 @@ def all_targets_in_module mod
       depend[obj_name].concat(depended_header path)
 
       action[obj_name] = [] if action[obj_name] == nil
-      action[obj_name] << "$(CC) $(CFLAGS) -c #{path} -o #{obj_name}"
+      action[obj_name] << "$(#{my_join "_", ["CC", build_mode]}) $(#{my_join "_", ["CFLAGS", build_mode]}) -c #{path} -o #{obj_name}"
     end
   end
 
   if defined? LIB_MODULES and LIB_MODULES.include? mod
     # make .a file
-    lib_name = "bin/lib#{mod}.a"
+    lib_name = (my_join "-", ["bin", build_mode]) + "/lib#{mod}.a"
     depend[mod] << lib_name
 
     depend[lib_name] = [] if depend[lib_name] == nil
@@ -114,9 +114,9 @@ def all_targets_in_module mod
 
   if defined? TEST_MODULES and TEST_MODULES.include? mod
     # add a run#{mod} target
-    run_mod = "run#{mod}"
+    run_mod = my_join "-", ["run#{mod}", build_mode]
     depend[run_mod] = [] if depend[run_mod] == nil
-    depend[run_mod] << mod
+    depend[run_mod] << (my_join "-", [mod, build_mode])
 
     action[run_mod] = [] if action[run_mod] == nil
     action[run_mod] << "@clear"
@@ -144,7 +144,7 @@ def all_targets_in_module mod
     $g_depend[target] = depend[target]
     if BUILD_MODULES.include? target
       content += <<CONTENT
-#{target}: bin obj #{depend[target].join " "}
+#{my_join "-", [target, build_mode]}: #{my_join "-", ["bin", build_mode]} #{my_join "-", ["obj", build_mode]} #{depend[target].join " "}
 #{action[target].collect {|act| "\t#{act}\n"}}
 CONTENT
     else
@@ -158,14 +158,24 @@ CONTENT
   return content
 end
 
-def gen_make_targets
+# generate all targets with a certain build mode
+def gen_make_targets build_mode
+
+  # clear g_depend, because this function will be run many times
+  $g_depend = {}
+
   content = ""
   BUILD_MODULES.sort.each do |mod|
-    content += all_targets_in_module mod
+    content += all_targets_in_module mod, build_mode
     content += "\n"
   end
 
-  content += "all: bin obj #{LIB_MODULES.collect {|mod| "bin/lib#{mod}.a "} if defined? LIB_MODULES}"
+  content += "#{my_join "-", ["all", build_mode]}: "
+  content += "#{my_join "-", ["bin", build_mode]} "
+  content += "#{my_join "-", ["obj", build_mode]} "
+  if defined? LIB_MODELS
+    content += LIB_MODULES.collect {|mod| (my_join "-", ["bin", build_mode]) + "/lib#{mod}.a "}
+  end
   $g_depend.keys.sort.each do |target|
     if target =~ /\.o$/ or target =~ /^bin\//
       content += target + " "
@@ -388,28 +398,82 @@ task :check do
   puts "Finished checking"
 end
 
+# Join string list. Skip empty strings.
+def my_join join_str, str_list
+  stripped_str_list = str_list.select {|str| str.length != 0}
+  stripped_str_list.join join_str
+end
+
 desc "Generate Makefile"
 task :gen => :check do
   puts "Generating Makefile"
+
+  # Default build mode
+  unless defined? BUILD_MODES
+    puts 'warning: BUILD_MODES not defined in rake.gen.conf, using default settings'
+    BUILD_MODES = {
+      "" => {
+        "CC" => "gcc",
+        "CFLAGS" => "-Wall",
+        "LDFLAGS" => ""
+      }
+    }
+  end
+
   File.open("Makefile", "w") do |mf|
-    
     mf_content = <<MF_EOF
 # WARNING! This file is automatically generated by "rake gen".
 # WARNING! Any modification to it would be lost after another "rake gen" operation!
 
 # Automatically generated at #{Time.now}
 
-CC=gcc
-CFLAGS=-ggdb -pthread -Wall #{BUILD_MODULES.collect {|mod| "-I#{mod} "}} -D_FILE_OFFSET_BITS=64
-LDFLAGS=-lpthread -lm
+#{
+BUILD_MODES.collect do |mode, settings|
+  <<MODE_CONSTS
+#{my_join("_", ["CC", mode])}=#{settings["CC"]}
+#{my_join("_", ["CFLAGS", mode])}=#{settings["CFLAGS"]} #{BUILD_MODULES.collect {|mod| "-I#{mod} "}}
+#{my_join("_", ["LDFLAGS", mode])}=#{settings["LDFLAGS"]}
+MODE_CONSTS
+end
+}
 
-default: bin obj #{DEFAULT_BUILD_MODULES.collect {|mod| mod + " "}}
+#{
+if BUILD_MODES.first[0] != ""
+"default: " + BUILD_MODES.first[0]
+else
+"default: #{my_join '-', ['bin', BUILD_MODES.first[0]]} #{my_join '-', ['obj', BUILD_MODES.first[0]]} #{DEFAULT_BUILD_MODULES.collect {|mod| (my_join '-', [mod, BUILD_MODES.first[0]]) + ' '}}"
+end
+}
 
-bin:
-	mkdir -p bin
+#{
+BUILD_MODES.collect do |build_mode, settings|
+  if build_mode != ""
+    "#{build_mode}: #{my_join '-', ['bin', build_mode]} #{my_join '-', ['obj', build_mode]} #{DEFAULT_BUILD_MODULES.collect {|mod| (my_join '-', [mod, build_mode]) + ' '}}\n\n"
+  end
+end
+}
 
-obj:
-#{mk_obj_dirs_list.collect {|dir| "\tmkdir -p obj/#{dir}\n"}}
+#{
+BUILD_MODES.collect do |mode, settings|
+  bin_target = my_join "-", ["bin", mode]
+  <<BIN_TARGET
+#{bin_target}:
+	mkdir -p #{bin_target}
+
+BIN_TARGET
+end
+}
+
+#{
+BUILD_MODES.collect do |mode, settings|
+  obj_target = my_join "-", ["obj", mode]
+  <<OBJ_TARGET
+#{obj_target}:
+#{mk_obj_dirs_list.collect {|dir| "\tmkdir -p #{obj_target}/#{dir}\n"}}
+
+OBJ_TARGET
+end
+}
 
 #{
 if File.exists? "Doxyfile"
@@ -421,13 +485,34 @@ end
 }
 
 clean:
-	rm -rf bin
-	rm -rf obj
+	rm -rf #{BUILD_MODES.collect {|mode, settings| (my_join "-", ["bin", mode]) + " "}}
+	rm -rf #{BUILD_MODES.collect {|mode, settings| (my_join "-", ["obj", mode]) + " "}}
 	rm -rf api
 	rm -f *.log
 	find . -iname *~ -delete
 
-#{gen_make_targets}
+#{
+BUILD_MODES.collect do |mode, settings|
+  gen_make_targets mode
+end
+}
+
+#{
+# default test targets
+if defined? TEST_MODULES and BUILD_MODES.first[0] != ""
+  TEST_MODULES.collect do |mod|
+    "run#{mod}: #{my_join "-", ["run#{mod}", BUILD_MODES.first[0]]}\n\n"
+  end
+end
+}
+
+#{
+if BUILD_MODES.first[0] != ""
+  BUILD_MODULES.collect do |mod|
+    "#{mod}: #{my_join "-", [mod, BUILD_MODES.first[0]]}\n\n"
+  end
+end
+}
 
 MF_EOF
     mf.write mf_content
@@ -443,64 +528,90 @@ MF_EOF
 
 # Automatically generated at #{Time.now}
 
-CC=gcc
-CFLAGS=-ggdb -pthread -Wall #{BUILD_MODULES.collect {|mod| "-I#{mod} "}} -D_FILE_OFFSET_BITS=64
-LDFLAGS=-lpthread -lm
+#{
+BUILD_MODES.collect do |mode, settings|
+  <<MODE_CONSTS
+#{my_join("_", ["CC", mode])}=#{settings["CC"]}
+#{my_join("_", ["CFLAGS", mode])}=#{settings["CFLAGS"]} #{BUILD_MODULES.collect {|mod| "-I#{mod} "}}
+#{my_join("_", ["LDFLAGS", mode])}=#{settings["LDFLAGS"]}
+MODE_CONSTS
+end
+}
 
-default: bin obj #{DEFAULT_BUILD_MODULES.collect {|mod| mod + " "}}
+#{
+if BUILD_MODES.first[0] != ""
+"default: " + BUILD_MODES.first[0]
+else
+"default: #{my_join '-', ['bin', BUILD_MODES.first[0]]} #{my_join '-', ['obj', BUILD_MODES.first[0]]} #{DEFAULT_BUILD_MODULES.collect {|mod| (my_join '-', [mod, BUILD_MODES.first[0]]) + ' '}}"
+end
+}
 
-bin:
-	md bin
+#{
+BUILD_MODES.collect do |build_mode, settings|
+  if build_mode != ""
+    "#{build_mode}: #{my_join '-', ['bin', build_mode]} #{my_join '-', ['obj', build_mode]} #{DEFAULT_BUILD_MODULES.collect {|mod| (my_join '-', [mod, build_mode]) + ' '}}\n\n"
+  end
+end
+}
 
-obj:
-#{mk_obj_dirs_list.collect {|dir| "\tmd obj/#{dir}\n"}}
+#{
+BUILD_MODES.collect do |mode, settings|
+  bin_target = my_join "-", ["bin", mode]
+  <<BIN_TARGET
+#{bin_target}:
+	md #{bin_target}
+
+BIN_TARGET
+end
+}
+
+#{
+BUILD_MODES.collect do |mode, settings|
+  obj_target = my_join "-", ["obj", mode]
+  <<OBJ_TARGET
+#{obj_target}:
+#{mk_obj_dirs_list.collect {|dir| "\tmd #{obj_target}/#{dir}\n"}}
+
+OBJ_TARGET
+end
+}
+
+#{
+if File.exists? "Doxyfile"
+  # only enable "make api" when there is already an Doxyfile
+"api: #{all_src_files.collect {|f| f + " "}}
+	doxygen
+"
+end
+}
 
 clean:
-	rd /S /Q bin
-	rd /S /Q obj
-	rd /S /Q api
 	for /r %f in (*.log) do del "%f"
 	for /r %f in (*~) do del "%f"
+#{
+BUILD_MODES.collect do |mode, settings|
+  "\trd /S /Q " + (my_join "-", ["bin", mode]) + "\n" +
+  "\trd /S /Q " + (my_join "-", ["obj", mode]) + "\n"
+end
+}
 
-#{gen_make_targets}
+#{
+BUILD_MODES.collect do |mode, settings|
+  gen_make_targets mode
+end
+}
+
+#{
+if BUILD_MODES.first[0] != ""
+  BUILD_MODULES.collect do |mod|
+    "#{mod}: #{my_join "-", [mod, BUILD_MODES.first[0]]}\n\n"
+  end
+end
+}
 
 MF_EOF
       mf_mingw32.write mf_mingw32_content
     end
-  end
-end
-
-desc "Run all test cases"
-task :test do
-  TEST_MODULES.each do |mod|
-    system "make #{mod}"
-  end
-  result = {}
-  TEST_MODULES.each do |mod|
-    Find.find(mod) do |f|
-      next if FileTest.directory? f
-      if f =~ /\.c$/ and has_main_entry? f
-        e = (File.basename f)[0..-3]
-        puts "== running test 'bin/#{e}'"
-        ret = system "cd bin && ./#{e}"
-        result[e] = ret
-        if ret
-          puts "-- success --\n\n"
-        else
-          puts "-- failure --\n\n"
-        end
-      end
-    end
-  end
-
-  puts "\n\n=== final report ===\n"
-  puts "-- success:\n"
-  result.each do |k, v|
-    puts "  #{k}" if v == true
-  end
-  puts "\n-- failure:\n"
-  result.each do |k, v|
-    puts "* #{k}" if v == false
   end
 end
 

@@ -1,4 +1,6 @@
 api/
 obj/
 bin/
+bin-*/
+obj-*/
 *.swp
