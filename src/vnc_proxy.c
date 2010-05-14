@@ -457,6 +457,8 @@ static void* ipc_server(void* arg) {
         }
         if (success == XSUCCESS) {
           xvec_push_back(vnc_mapping, new_mapping);
+        } else {
+          vnc_mapping_free(new_mapping);
         }
         send(client_sockfd, xstr_get_cstr(reply_msg), xstr_len(reply_msg) + 1, 0);
         xstr_delete(reply_msg);
