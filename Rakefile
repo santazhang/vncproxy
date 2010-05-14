@@ -411,13 +411,13 @@ task :gen => :check do
   # Default build mode
   unless defined? BUILD_MODES
     puts 'warning: BUILD_MODES not defined in rake.gen.conf, using default settings'
-    BUILD_MODES = {
+    BUILD_MODES = [
       "" => {
         "CC" => "gcc",
         "CFLAGS" => "-Wall",
         "LDFLAGS" => ""
       }
-    }
+    ]
   end
 
   File.open("Makefile", "w") do |mf|
@@ -428,7 +428,9 @@ task :gen => :check do
 # Automatically generated at #{Time.now}
 
 #{
-BUILD_MODES.collect do |mode, settings|
+BUILD_MODES.collect do |build_mode_info|
+  mode = build_mode_info.first[0]
+  settings = build_mode_info.first[1]
   <<MODE_CONSTS
 #{my_join("_", ["CC", mode])}=#{settings["CC"]}
 #{my_join("_", ["CFLAGS", mode])}=#{settings["CFLAGS"]} #{BUILD_MODULES.collect {|mod| "-I#{mod} "}}
@@ -438,15 +440,18 @@ end
 }
 
 #{
-if BUILD_MODES.first[0] != ""
-"default: " + BUILD_MODES.first[0]
+first_mode_name = BUILD_MODES.first.first[0]
+if first_mode_name != ""
+"default: " + first_mode_name
 else
-"default: #{my_join '-', ['bin', BUILD_MODES.first[0]]} #{my_join '-', ['obj', BUILD_MODES.first[0]]} #{DEFAULT_BUILD_MODULES.collect {|mod| (my_join '-', [mod, BUILD_MODES.first[0]]) + ' '}}"
+"default: #{my_join '-', ['bin', first_mode_name]} #{my_join '-', ['obj', first_mode_name]} #{DEFAULT_BUILD_MODULES.collect {|mod| (my_join '-', [mod, first_mode_name]) + ' '}}"
 end
 }
 
 #{
-BUILD_MODES.collect do |build_mode, settings|
+BUILD_MODES.collect do |build_mode_info|
+  build_mode = build_mode_info.first[0]
+  settings = build_mode_info.first[1]
   if build_mode != ""
     "#{build_mode}: #{my_join '-', ['bin', build_mode]} #{my_join '-', ['obj', build_mode]} #{DEFAULT_BUILD_MODULES.collect {|mod| (my_join '-', [mod, build_mode]) + ' '}}\n\n"
   end
@@ -454,7 +459,10 @@ end
 }
 
 #{
-BUILD_MODES.collect do |mode, settings|
+BUILD_MODES.collect do |build_mode_info|
+  mode = build_mode_info.first[0]
+  puts "** " + mode
+  settings = build_mode_info.first[1]
   bin_target = my_join "-", ["bin", mode]
   <<BIN_TARGET
 #{bin_target}:
@@ -465,7 +473,9 @@ end
 }
 
 #{
-BUILD_MODES.collect do |mode, settings|
+BUILD_MODES.collect do |build_mode_info|
+  mode = build_mode_info.first[0]
+  settings = build_mode_info.first[1]
   obj_target = my_join "-", ["obj", mode]
   <<OBJ_TARGET
 #{obj_target}:
@@ -485,31 +495,34 @@ end
 }
 
 clean:
-	rm -rf #{BUILD_MODES.collect {|mode, settings| (my_join "-", ["bin", mode]) + " "}}
-	rm -rf #{BUILD_MODES.collect {|mode, settings| (my_join "-", ["obj", mode]) + " "}}
+	rm -rf #{BUILD_MODES.collect {|build_mode_info| (my_join "-", ["bin", build_mode_info.first[0]]) + " "}}
+	rm -rf #{BUILD_MODES.collect {|build_mode_info| (my_join "-", ["obj", build_mode_info.first[0]]) + " "}}
 	rm -rf api
 	rm -f *.log
 	find . -iname *~ -delete
 
 #{
-BUILD_MODES.collect do |mode, settings|
-  gen_make_targets mode
+BUILD_MODES.collect do |build_mode_info|
+  mode_name = build_mode_info.first[0]
+  gen_make_targets mode_name
 end
 }
 
 #{
 # default test targets
-if defined? TEST_MODULES and BUILD_MODES.first[0] != ""
+first_build_mode = BUILD_MODES.first.first[0]
+if defined? TEST_MODULES and first_build_mode != ""
   TEST_MODULES.collect do |mod|
-    "run#{mod}: #{my_join "-", ["run#{mod}", BUILD_MODES.first[0]]}\n\n"
+    "run#{mod}: #{my_join "-", ["run#{mod}", first_build_mode]}\n\n"
   end
 end
 }
 
 #{
-if BUILD_MODES.first[0] != ""
+first_build_mode = BUILD_MODES.first.first[0]
+if first_build_mode != ""
   BUILD_MODULES.collect do |mod|
-    "#{mod}: #{my_join "-", [mod, BUILD_MODES.first[0]]}\n\n"
+    "#{mod}: #{my_join "-", [mod, first_build_mode]}\n\n"
   end
 end
 }
@@ -529,7 +542,9 @@ MF_EOF
 # Automatically generated at #{Time.now}
 
 #{
-BUILD_MODES.collect do |mode, settings|
+BUILD_MODES.collect do |build_mode_info|
+  mode = build_mode_info.first[0]
+  settings = build_mode_info.first[1]
   <<MODE_CONSTS
 #{my_join("_", ["CC", mode])}=#{settings["CC"]}
 #{my_join("_", ["CFLAGS", mode])}=#{settings["CFLAGS"]} #{BUILD_MODULES.collect {|mod| "-I#{mod} "}}
@@ -539,15 +554,18 @@ end
 }
 
 #{
-if BUILD_MODES.first[0] != ""
-"default: " + BUILD_MODES.first[0]
+first_build_mode = BUILD_MODES.first.first[0]
+if first_build_mode != ""
+"default: " + first_build_mode
 else
-"default: #{my_join '-', ['bin', BUILD_MODES.first[0]]} #{my_join '-', ['obj', BUILD_MODES.first[0]]} #{DEFAULT_BUILD_MODULES.collect {|mod| (my_join '-', [mod, BUILD_MODES.first[0]]) + ' '}}"
+"default: #{my_join '-', ['bin', first_build_mode]} #{my_join '-', ['obj', first_build_mode]} #{DEFAULT_BUILD_MODULES.collect {|mod| (my_join '-', [mod, first_build_mode]) + ' '}}"
 end
 }
 
 #{
-BUILD_MODES.collect do |build_mode, settings|
+BUILD_MODES.collect do |build_mode_info|
+  build_mode = build_mode_info.first[0]
+  settings = build_mode_info.first[1]
   if build_mode != ""
     "#{build_mode}: #{my_join '-', ['bin', build_mode]} #{my_join '-', ['obj', build_mode]} #{DEFAULT_BUILD_MODULES.collect {|mod| (my_join '-', [mod, build_mode]) + ' '}}\n\n"
   end
@@ -555,7 +573,9 @@ end
 }
 
 #{
-BUILD_MODES.collect do |mode, settings|
+BUILD_MODES.collect do |build_mode_info|
+  mode = build_mode_info.first[0]
+  settings = build_mode_info.first[1]
   bin_target = my_join "-", ["bin", mode]
   <<BIN_TARGET
 #{bin_target}:
@@ -566,7 +586,8 @@ end
 }
 
 #{
-BUILD_MODES.collect do |mode, settings|
+BUILD_MODES.collect do |build_mode_info|
+  mode = build_mode_info.first[0]
   obj_target = my_join "-", ["obj", mode]
   <<OBJ_TARGET
 #{obj_target}:
@@ -589,22 +610,25 @@ clean:
 	for /r %f in (*.log) do del "%f"
 	for /r %f in (*~) do del "%f"
 #{
-BUILD_MODES.collect do |mode, settings|
+BUILD_MODES.collect do |build_mode_info|
+  mode = build_mode_info.first[0]
   "\trd /S /Q " + (my_join "-", ["bin", mode]) + "\n" +
   "\trd /S /Q " + (my_join "-", ["obj", mode]) + "\n"
 end
 }
 
 #{
-BUILD_MODES.collect do |mode, settings|
+BUILD_MODES.collect do |build_mode_info|
+  mode = build_mode_info.first[0]
   gen_make_targets mode
 end
 }
 
 #{
-if BUILD_MODES.first[0] != ""
+first_build_mode = BUILD_MODES.first.first[0]
+if first_build_mode != ""
   BUILD_MODULES.collect do |mod|
-    "#{mod}: #{my_join "-", [mod, BUILD_MODES.first[0]]}\n\n"
+    "#{mod}: #{my_join "-", [mod, first_build_mode]}\n\n"
   end
 end
 }
