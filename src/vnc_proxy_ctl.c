@@ -52,7 +52,7 @@ int connect_server() {
   }
 
   if ((sockfd = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) {
-    perror("failed to create socket\n");
+    perror("failed to create socket");
     exit(1);
   }
 
@@ -60,7 +60,7 @@ int connect_server() {
   strcpy(remote.sun_path, xstr_get_cstr(sock_fn));
   len = strlen(remote.sun_path) + sizeof(remote.sun_family);
   if (connect(sockfd, (struct sockaddr *) &remote, len) < 0) {
-    perror("failed to connect to server\n");
+    perror("failed to connect to server");
     exit(1);
   }
 

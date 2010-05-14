@@ -1,4 +1,4 @@
-#include "bigint/bigint.h"
+#include "3rdparty/bigint/bigint.h"
 
 #include "xmemory.h"
 #include "xbigint.h"

@@ -1,8 +1,8 @@
 #include "xcrypto.h"
 #include "xmemory.h"
 
-#include "crypto/md5/md5.h"
-#include "crypto/sha1/sha1.h"
+#include "3rdparty/crypto/md5/md5.h"
+#include "3rdparty/crypto/sha1/sha1.h"
 
 /**
   @brief
