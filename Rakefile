@@ -553,7 +553,7 @@ end
 #{
 default_build_mode = BUILD_MODES.first[0]
 if defined? DEFAULT_BUILD_MODE
-  default_build_mode = DEFAULT_BUILD_MDOE
+  default_build_mode = DEFAULT_BUILD_MODE
 end
 if default_build_mode != ""
 "default: " + default_build_mode
@@ -621,7 +621,7 @@ end
 # default test targets
 default_build_mode = BUILD_MODES.first[0]
 if defined? DEFAULT_BUILD_MODE
-  default_build_mode = DEFAULT_BUILD_MDOE
+  default_build_mode = DEFAULT_BUILD_MODE
 end
 if defined? TEST_MODULES and default_build_mode != ""
   TEST_MODULES.collect do |mod|
@@ -633,7 +633,7 @@ end
 #{
 default_build_mode = BUILD_MODES.first[0]
 if defined? DEFAULT_BUILD_MODE
-  default_build_mode = DEFAULT_BUILD_MDOE
+  default_build_mode = DEFAULT_BUILD_MODE
 end
 if default_build_mode != ""
   BUILD_MODULES.collect do |mod|
