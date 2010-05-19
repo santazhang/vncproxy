@@ -374,6 +374,7 @@ static void* acceptor_wrapper(void* pthread_arg) {
   xsocket_delete(client_xs);
 
   xmem_usage(stdout);
+  pthread_exit(NULL);
   return NULL;
 }
 
