@@ -1,5 +1,6 @@
-# Helper Rakefile for liquid project
-# Author: Santa Zhang
+# Rakefile for automatically generate Makefiles.
+#
+# Author: Santa Zhang (santa1987@gmail.com)
 
 require 'find'
 
