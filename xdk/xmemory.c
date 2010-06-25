@@ -2,7 +2,12 @@
 #define XMEM_DEBUG 0
 #endif  // XMEM_DEBUG
 
+#ifndef __APPLE__
 #include <malloc.h>
+#else
+#include <stdlib.h>
+#endif // __APPLE__
+
 #include <string.h>
 #include <stdarg.h>
 
