@@ -15,3 +15,5 @@ Makefile.in
 *.o
 vncproxy
 .deps/
+configure
+
