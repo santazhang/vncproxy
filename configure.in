@@ -1,0 +1,19 @@
+# autoconf file for vncproxy
+# author: Santa Zhang <santa1987@gmail.com>
+
+AC_INIT(vncproxy, 0.1-nightly)
+AM_INIT_AUTOMAKE(vncproxy, 0.1-nightly)
+AM_CONFIG_HEADER(config.h)
+
+AC_PROG_CXX
+AC_PROG_INSTALL
+AC_PROG_MAKE_SET
+
+AC_HEADER_STDC
+
+AC_LANG(C++)
+
+AC_CHECK_HEADERS(string, , AC_MSG_WARN(STL classes missing ?))
+
+AC_OUTPUT(Makefile)
+
