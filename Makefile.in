@@ -53,7 +53,8 @@ CONFIG_CLEAN_FILES =
 CONFIG_CLEAN_VPATH_FILES =
 am__installdirs = "$(DESTDIR)$(bindir)"
 PROGRAMS = $(bin_PROGRAMS)
-am_vncproxy_OBJECTS = vncproxy.$(OBJEXT) d3des.$(OBJEXT)
+am_vncproxy_OBJECTS = vncproxy.$(OBJEXT) d3des.$(OBJEXT) \
+	sockutils.$(OBJEXT)
 vncproxy_OBJECTS = $(am_vncproxy_OBJECTS)
 vncproxy_LDADD = $(LDADD)
 DEFAULT_INCLUDES = -I.@am__isrc@
@@ -187,7 +188,7 @@ top_build_prefix = @top_build_prefix@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
 AUTOMAKE_OPTIONS = gnu
-vncproxy_SOURCES = vncproxy.cc d3des.c d3des.h
+vncproxy_SOURCES = vncproxy.cc d3des.c d3des.h sockutils.c sockutils.h
 all: config.h
 	$(MAKE) $(AM_MAKEFLAGS) all-am
 
@@ -292,6 +293,7 @@ distclean-compile:
 	-rm -f *.tab.c
 
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/d3des.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/sockutils.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/vncproxy.Po@am__quote@
 
 .c.o:
