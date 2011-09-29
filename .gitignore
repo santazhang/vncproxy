@@ -2,6 +2,7 @@
 *.o
 *.out
 *.swp
+*.tmproj
 *~
 .DS_Store
 .deps/

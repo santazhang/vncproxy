@@ -13,7 +13,12 @@ AC_HEADER_STDC
 
 AC_LANG(C++)
 
+m4_include([m4/acx_pthread.m4])
 ACX_PTHREAD
+
+LIBS="$PTHREAD_LIBS $LIBS"
+CFLAGS="$CFLAGS $PTHERAD_CFLAGS"
+
 AC_CHECK_HEADERS(string, , AC_MSG_WARN(STL classes missing ?))
 
 AC_OUTPUT(Makefile)
