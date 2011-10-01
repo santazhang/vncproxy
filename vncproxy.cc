@@ -10,7 +10,10 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/select.h>
+#include <sys/stat.h>
 #include <netinet/in.h>
+#include <unistd.h>
+#include <signal.h>
 
 #include "config.h"
 
@@ -41,6 +44,10 @@ static bool str_starts_with(const char* str, const char* head) {
     return head[i] == '\0';
 }
 
+static void die(int ret_code) {
+    unlink(g_sock_fpath);
+    exit(ret_code);
+}
 
 static void print_version() {
     printf("vncproxy version %s\n", VERSION);
@@ -68,14 +75,49 @@ static void print_help() {
     printf("\n");
 }
 
-static void handle_vnc_client(int client_sock) {
-    
-    // TODO fork, and handle in child process
 
-    close(client_sock);
+static inline int send_message(int sock, const char* msg) {
+    int write_cnt = 0;
+    int msg_len = strlen(msg);
+    while (write_cnt < msg_len) {
+        int cnt = write(sock, msg + write_cnt, msg_len - write_cnt);
+        if (cnt < 0) {
+            return -1;
+        }
+        write_cnt += cnt;
+    }
+    return 0;
+}
+
+static void handle_vnc_client(int client_sock) {
+    pid_t pid = fork();
+    if (pid < 0) {
+        printf("ERROR: failed to fork() new process!\n");
+        die(1);
+    } else if (pid > 0) {
+        // close socket in parent process
+        close(client_sock);
+        return;
+    }
+    
+    // begin VNC forwarding service
+    
+    // handshake on VNC version, only support 3.8
+    if (send_message(client_sock, "RFB 003.008\n") < 0) {
+        exit(1);
+    }
+    
+    char buf[8192];
+    if (recv(client_sock, buf, 12, MSG_WAITALL) < 0) {
+        exit(1);
+    }
+    
+    exit(0);
 }
 
 static void* vnc_server(void* arg) {
+    signal(SIGCHLD, SIG_IGN);
+    
     int svrsock = *(int *) arg;
     
     fd_set fdset;
@@ -163,11 +205,6 @@ static inline bool server_is_alive() {
         close(sock);
         return true;
     }
-}
-
-
-static inline void send_message(int sock, const char* msg) {
-    write(sock, msg, strlen(msg));
 }
 
 static int start_server(const char* host_port) {
