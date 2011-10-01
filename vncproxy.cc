@@ -8,6 +8,8 @@
 #include <pthread.h>
 #include <errno.h>
 #include <sys/socket.h>
+#include <sys/un.h>
+#include <sys/select.h>
 #include <netinet/in.h>
 
 #include "config.h"
@@ -19,9 +21,11 @@ using namespace std;
 
 static const char* g_sock_fpath = "/tmp/vncproxy.sock";
 
-static pthread_mutex_t mtx_mapping = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t mapping_mtx = PTHREAD_MUTEX_INITIALIZER;
 static map<string, string> g_mapping;
 
+static pthread_t vnc_server_tid;
+static bool vnc_stop_flag = false;
 
 static inline bool str_eq(const char* str1, const char* str2) {
     return strcmp(str1, str2) == 0;
@@ -50,7 +54,7 @@ static void print_help() {
     printf("       vncproxy stop\n");
     printf("           Stop currently running vncproxy service\n");
     printf("\n");
-    printf("       vncproxy restart [-b HOST] [-p PORT]\n");
+    printf("       vncproxy restart HOST:PORT\n");
     printf("           Restart currently running vncproxy, will serve on HOST:PORT\n");
     printf("\n");
     printf("       vncproxy list\n");
@@ -64,7 +68,94 @@ static void print_help() {
     printf("\n");
 }
 
-static bool server_is_alive() {
+static void handle_vnc_client(int client_sock) {
+    
+    // TODO fork, and handle in child process
+
+    close(client_sock);
+}
+
+static void* vnc_server(void* arg) {
+    int svrsock = *(int *) arg;
+    
+    fd_set fdset;
+    int fdmax = svrsock;  // so far, it's this one
+    
+    FD_ZERO(&fdset);
+    FD_SET(svrsock, &fdset);
+    
+    while (vnc_stop_flag == false) {
+        struct timeval tv;
+        tv.tv_sec = 0;
+        tv.tv_usec = 10 * 1000;  // 10ms timeout
+        fd_set accept_fdset = fdset;
+        int ret = select(fdmax + 1, &accept_fdset, NULL, NULL, &tv);
+        
+        if (ret < 0) {
+            if (errno == EINTR) {
+                // interrupted syscall, no problem
+                continue;
+            } else {
+                printf("ERROR: failed in select() call, %s!\n", strerror(errno));
+                break;
+            }
+        } else if (ret == 0) {
+            // timeout, do nothing
+        } else {
+            int fd;
+            for (fd = 0; fd <= fdmax; fd++) {
+                if (FD_ISSET(fd, &accept_fdset) && fd == svrsock) {
+                    struct sockaddr_in clnt;
+                    socklen_t in_len = sizeof(clnt);
+                    int client_sock = accept(svrsock, (struct sockaddr *) &clnt, &in_len);
+                    if (client_sock < 0) {
+                        printf("ERROR: failed to accept client request, error: %s!\n", strerror(errno));
+                    } else {
+                        printf("INFO: got client, file descriptor = %d\n", client_sock);
+                        handle_vnc_client(client_sock);
+                    }
+                }
+            }
+        }
+    }
+    
+    close(svrsock);
+}
+
+
+static inline int start_vnc_server(const char* host_port) {
+    char* host = strdup(host_port);
+    int port = -1;
+    int idx;
+    for (idx = 0; host[idx] != '\0'; idx++) {
+        if (host[idx] == ':') {
+            port = atoi(host + idx + 1);
+            host[idx] = '\0';
+            break;
+        }
+    }
+    if (port < 0) {
+        printf("ERROR: bad HOST:PORT parameter!\n");
+        return EINVAL;
+    }
+    printf("INFO: starting vncproxy server, host='%s', port=%d\n", host, port);
+    
+    int svrsock = tcpsvrsock(host, port);
+    if (svrsock < 0) {
+        return EACCES;
+    } else {
+        return pthread_create(&vnc_server_tid, NULL, vnc_server, &svrsock);
+    }
+}
+
+
+static inline void stop_vnc_server() {
+    vnc_stop_flag = true;
+    pthread_join(vnc_server_tid, NULL);
+}
+
+
+static inline bool server_is_alive() {
     int sock = unixclntsock(g_sock_fpath);
     if (sock < 0) {
         return false;
@@ -79,25 +170,26 @@ static inline void send_message(int sock, const char* msg) {
     write(sock, msg, strlen(msg));
 }
 
-static int start_server() {
+static int start_server(const char* host_port) {
     if (server_is_alive()) {
         printf("%s", "ERROR: vncproxy server already running!\n");
         return EBUSY;
     }
     
-    // TODO start VNC redirecting service
-    
+    if (start_vnc_server(host_port) != 0) {
+        return EACCES;
+    }
     
     // start control server
     int ctl_sock = unixsvrsock(g_sock_fpath);
     
-    struct sockaddr_in clnt;
-    socklen_t in_len = sizeof(clnt);
+    struct sockaddr_un clnt;
+    socklen_t un_len = sizeof(clnt);
     char req[8192], buf[8192];
     
     // accept control requests, run service until 'stop' request is received
     for (;;) {
-        int sock = accept(ctl_sock, (struct sockaddr *) &clnt, &in_len);
+        int sock = accept(ctl_sock, (struct sockaddr *) &clnt, &un_len);
         
         // handle control requests here
         int total_cnt = 0;
@@ -113,12 +205,12 @@ static int start_server() {
         if (str_starts_with(req, "list\n")) {
             printf("%s", "INFO: got 'list' request\n");
             
-            pthread_mutex_lock(&mtx_mapping);
+            pthread_mutex_lock(&mapping_mtx);
             for (map<string, string>::iterator it = g_mapping.begin(); it != g_mapping.end(); ++it) {
                 sprintf(buf, "%s --> %s\n", it->first.c_str(), it->second.c_str());
                 send_message(sock, buf);
             }
-            pthread_mutex_unlock(&mtx_mapping);
+            pthread_mutex_unlock(&mapping_mtx);
         
         } else if (str_starts_with(req, "add\n")) {
             
@@ -151,14 +243,14 @@ static int start_server() {
                 send_message(sock, "ERROR: invalid mapping name! Only letters, numeric digits and punctuation characters are allowed. The mapping name must not be empty and contains at most 8 characters.\n");
                 
             } else {
-                pthread_mutex_lock(&mtx_mapping);
+                pthread_mutex_lock(&mapping_mtx);
                 if (g_mapping.find(name) != g_mapping.end()) {
                     send_message(sock, "ERROR: mapping already exists!\n");
                 } else {
                     g_mapping[name] = dest;
                     send_message(sock, "INFO: mapping added\n");
                 }
-                pthread_mutex_unlock(&mtx_mapping);
+                pthread_mutex_unlock(&mapping_mtx);
             }
 
         } else if (str_starts_with(req, "remove\n")) {
@@ -172,7 +264,7 @@ static int start_server() {
             
             printf("INFO: got 'remove' request, name='%s'\n", name.c_str());
 
-            pthread_mutex_lock(&mtx_mapping);
+            pthread_mutex_lock(&mapping_mtx);
             map<string, string>::iterator it = g_mapping.find(name);
             if (it != g_mapping.end()) {
                 g_mapping.erase(it);
@@ -180,7 +272,7 @@ static int start_server() {
             } else {
                 send_message(sock, "ERROR: mapping not found!\n");
             }
-            pthread_mutex_unlock(&mtx_mapping);
+            pthread_mutex_unlock(&mapping_mtx);
             
         } else if (str_starts_with(req, "stop\n")) {
             printf("%s", "INFO: got 'stop' request\n");
@@ -194,7 +286,7 @@ static int start_server() {
         close(sock);
     }
     
-    // TODO stop VNC redirecting service
+    stop_vnc_server();
     
     unlink(g_sock_fpath);
     return 0;
@@ -290,6 +382,7 @@ static int remove_mapping(const char* name) {
 
 
 int main(int argc, char* argv[]) {
+    int ret = 0;
     if (argc <= 1) {
         print_help();
         exit(1);
@@ -308,14 +401,26 @@ int main(int argc, char* argv[]) {
     
     char* cmd = argv[1];
     if (str_eq(cmd, "start")) {
-        start_server();
+        if (argc < 3) {
+            print_help();
+            exit(1);
+        }
+        
+        const char* host_port = argv[2];
+        ret = start_server(host_port);
         
     } else if (str_eq(cmd, "stop")) {
         stop_server();
         
     } else if (str_eq(cmd, "restart")) {
+        if (argc < 3) {
+            print_help();
+            exit(1);
+        }
+        
+        const char* host_port = argv[2];
         stop_server();
-        start_server();
+        ret = start_server(host_port);
         
     } else if (str_eq(cmd, "list")) {
         list_mapping();
@@ -344,5 +449,5 @@ int main(int argc, char* argv[]) {
         
     }
     
-    return 0;
+    return ret;
 }
