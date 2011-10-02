@@ -22,6 +22,11 @@
  *	(GEnie : OUTER; CIS : [71755,204])
  */
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+
 #define EN0	0	/* MODE == encrypt */
 #define DE1	1	/* MODE == decrypt */
 
@@ -49,6 +54,10 @@ extern void rfbDes(unsigned char *, unsigned char *);
  * internal key register) one block of eight bytes at address 'from'
  * into the block at address 'to'.  They can be the same.
  */
+
+#ifdef __cplusplus
+}
+#endif
 
 /* d3des.h V5.09 rwo 9208.04 15:06 Graven Imagery
  ********************************************************************/

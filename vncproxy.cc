@@ -19,6 +19,7 @@
 
 #include "d3des.h"
 #include "sockutils.h"
+#include "zbuf.h"
 
 using namespace std;
 
@@ -89,6 +90,103 @@ static inline int send_message(int sock, const char* msg) {
     return 0;
 }
 
+static void socket_forwarding(int sock1, int sock2) {
+    unsigned char buf[8192];
+    
+    zbuf buf12 = zbuf_new();
+    zbuf buf21 = zbuf_new();
+    
+    fd_set master_fds;
+    FD_ZERO(&master_fds);
+    FD_SET(sock1, &master_fds);
+    FD_SET(sock2, &master_fds);
+    
+    int fdmax = sock1;
+    if (sock2 > fdmax) {
+        fdmax = sock2;
+    }
+    
+    for (;;) {
+        fd_set error_fds = master_fds;
+        fd_set read_fds = master_fds;
+        fd_set write_fds;
+        
+        FD_ZERO(&write_fds);
+        if (zbuf_size(buf12) > 0) {
+            FD_SET(sock2, &write_fds);
+        }
+        if (zbuf_size(buf21) > 0) {
+            FD_SET(sock1, &write_fds);
+        }
+        
+        struct timeval tv;
+        tv.tv_sec = 0;
+        tv.tv_usec = 1000 * 10;
+        
+        int ret = select(fdmax + 1, &read_fds, &write_fds, &error_fds, &tv);
+        if (ret < 0) {
+            printf("ERROR: socket forwarding error!\n");
+            break;
+        } else if (ret == 0) {
+            // do nothing
+        } else {
+            if (FD_ISSET(sock1, &error_fds) || FD_ISSET(sock2, &error_fds)) {
+                printf("ERROR: error on forwarding socket!\n");
+                exit(1);
+            }
+            if (FD_ISSET(sock1, &read_fds)) {
+                int cnt = read(sock1, buf, sizeof(buf));
+                if (cnt < 0) {
+                    printf("ERROR: network IO failed!\n");
+                    exit(1);
+                } else if (cnt == 0) {
+                    break;
+                }
+                zbuf_append(buf12, buf, cnt);
+            }
+            if (FD_ISSET(sock2, &read_fds)) {
+                int cnt = read(sock2, buf, sizeof(buf));
+                if (cnt < 0) {
+                    printf("ERROR: network IO failed!\n");
+                    exit(1);
+                } else if (cnt == 0) {
+                    break;
+                }
+                zbuf_append(buf21, buf, cnt);
+            }
+            if (FD_ISSET(sock1, &write_fds)) {
+                int peek_cnt = zbuf_peek(buf21, buf, sizeof(buf));
+                if (peek_cnt > 0) {
+                    int write_cnt = write(sock1, buf, peek_cnt);
+                    if (write_cnt < 0) {
+                        printf("ERROR: network IO failed!\n");
+                        exit(1);
+                    } else if (write_cnt == 0) {
+                        break;
+                    }
+                    zbuf_discard(buf21, write_cnt);
+                }
+            }
+            if (FD_ISSET(sock2, &write_fds)) {
+                int peek_cnt = zbuf_peek(buf12, buf, sizeof(buf));
+                if (peek_cnt > 0) {
+                    int write_cnt = write(sock2, buf, peek_cnt);
+                    if (write_cnt < 0) {
+                        printf("ERROR: network IO failed!\n");
+                        exit(1);
+                    } else if (write_cnt == 0) {
+                        break;
+                    }
+                    zbuf_discard(buf12, write_cnt);                    
+                }
+            }
+        }
+    }
+    
+    zbuf_delete(buf12);
+    zbuf_delete(buf21);
+}
+
 static void handle_vnc_client(int client_sock) {
     pid_t pid = fork();
     if (pid < 0) {
@@ -142,7 +240,7 @@ static void handle_vnc_client(int client_sock) {
     srand(time(NULL) + getpid());
     
     // challenge the client for password
-    char challenge[16], response[16];
+    unsigned char challenge[16], response[16];
     for (int i = 0; i < sizeof(challenge); i++) {
         challenge[i] = rand() & 0xFF;
     }
@@ -156,16 +254,102 @@ static void handle_vnc_client(int client_sock) {
     }
     
     bool auth_ok = false;
+    string dest;
     
     // TODO auth, and forwarding
+    pthread_mutex_lock(&mapping_mtx);
+    for (map<string, string>::iterator it = g_mapping.begin(); it != g_mapping.end(); ++it) {
+        string name = it->first;
+        unsigned char expected_response[16];
+        unsigned char auth_key[8];
+        int i;
+        for (i = 0; i < 8 && i < name.length(); i++) {
+            auth_key[i] = name[i];
+        }
+        while (i < 8) {
+            auth_key[i] = '\0';
+            i++;
+        }
+        rfbDesKey(auth_key, EN0);
+        
+        for (i = 0; i < 16; i += 8) {
+          rfbDes(challenge + i, expected_response + i);
+        }
+        
+        if (memcmp(response, expected_response, 16) == 0) {
+            printf("INFO: client mapped to '%s'\n", dest.c_str());
+            auth_ok = true;
+            dest = it->second;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&mapping_mtx);
     
     if (auth_ok) {
-        // TODO
+        printf("INFO: connecting to '%s'\n", dest.c_str());
+        char* host = strdup(dest.c_str());
+        int port = -1;
+        int idx;
+        for (idx = 0; host[idx] != '\0'; idx++) {
+            if (host[idx] == ':') {
+                port = atoi(host + idx + 1);
+                host[idx] = '\0';
+                break;
+            }
+        }
+        int vnc_sock = tcpclntsock(host, port);
+        
+        if (recv(vnc_sock, buf, 12, MSG_WAITALL) < 0) {
+            printf("ERROR: network IO failed!\n");
+            exit(1);
+        }
+        
+        if (send_message(vnc_sock, "RFB 003.008\n") < 0) {
+            printf("ERROR: network IO failed!\n");
+            exit(1);
+        }
+        
+        if (recv(vnc_sock, buf, 1, MSG_WAITALL) < 0) {
+            printf("ERROR: network IO failed!\n");
+            exit(1);
+        }
+        
+        int auth_type_count = buf[0];
+        bool support_none_auth = false;
+        printf("INFO: real VNC server has %d types of authentication\n", auth_type_count);
+        if (recv(vnc_sock, buf, auth_type_count, MSG_WAITALL) < 0) {
+            printf("ERROR: network IO failed!\n");
+            exit(1);
+        }
+        
+        for (int i = 0; i < auth_type_count; i++) {
+            if (buf[i] == 1) {
+                support_none_auth = true;
+                break;
+            }
+        }
+        
+        if (support_none_auth) {
+            printf("INFO: real VNC server supports 'none' authentication\n");
+        } else {
+            printf("ERROR: real VNC server do NOT supports 'none' authentication!\n");
+            exit(1);
+        }
+        
+        // tell real VNC server to use none auth
+        if (send_message(vnc_sock, "\1") < 0) {
+            printf("ERROR: network IO failed!\n");
+            exit(1);
+        }
+        
+        // now start forwarding
+        printf("INFO: start VNC forwarding\n");
+        
+        socket_forwarding(vnc_sock, client_sock);
         
     } else {
-        printf("ERROR: client authentication failed!\n");
-        
         const char* failure_msg = "client authentication failed!";
+        printf("ERROR: %s\n", failure_msg);
 
         // well, be careful about the endians
         buf[0] = 0;
