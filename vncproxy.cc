@@ -101,17 +101,90 @@ static void handle_vnc_client(int client_sock) {
     }
     
     // begin VNC forwarding service
+    // do not use die() from now on, since we are working in forked child process,
+    // not the master process which holds the control socket
     
     // handshake on VNC version, only support 3.8
     if (send_message(client_sock, "RFB 003.008\n") < 0) {
+        printf("ERROR: network IO failed!\n");
         exit(1);
     }
     
     char buf[8192];
     if (recv(client_sock, buf, 12, MSG_WAITALL) < 0) {
+        printf("ERROR: network IO failed!\n");
         exit(1);
     }
     
+    buf[12] = '\0';
+    printf("INFO: client using protocol: %s", buf);
+    if (!str_eq(buf, "RFB 003.008\n")) {
+        printf("ERROR: client protocol not supported!\n");
+        exit(1);
+    }
+    
+    // request password from client, which is actually the mapping name
+    buf[0] = 1; // 1 security type
+    buf[1] = 2; // use VNC auth
+    if (send(client_sock, buf, 2, MSG_WAITALL) < 0) {
+        printf("ERROR: network IO failed!\n");
+        exit(1);
+    }
+    
+    // get reply from client
+    if (recv(client_sock, buf, 1, MSG_WAITALL) < 0) {
+        printf("ERROR: network IO failed!\n");
+        exit(1);
+    }
+    
+    printf("INFO: client security type: 0x%x\n", (int) buf[0]);
+    
+    srand(time(NULL) + getpid());
+    
+    // challenge the client for password
+    char challenge[16], response[16];
+    for (int i = 0; i < sizeof(challenge); i++) {
+        challenge[i] = rand() & 0xFF;
+    }
+    if (send(client_sock, challenge, sizeof(challenge), MSG_WAITALL) < 0) {
+        printf("ERROR: network IO failed!\n");
+        exit(1);
+    }
+    if (recv(client_sock, response, sizeof(response), MSG_WAITALL) < 0) {
+        printf("ERROR: network IO failed!\n");
+        exit(1);
+    }
+    
+    bool auth_ok = false;
+    
+    // TODO auth, and forwarding
+    
+    if (auth_ok) {
+        // TODO
+        
+    } else {
+        printf("ERROR: client authentication failed!\n");
+        
+        const char* failure_msg = "client authentication failed!";
+
+        // well, be careful about the endians
+        buf[0] = 0;
+        buf[1] = 0;
+        buf[2] = 0;
+        buf[3] = 1; // indicate failure
+        buf[4] = 0;
+        buf[5] = 0;
+        buf[6] = 0;
+        buf[7] = strlen(failure_msg);
+        strcpy((char *) (buf + 8), failure_msg);
+        
+        if (send(client_sock, buf, strlen(failure_msg) + 8, MSG_WAITALL) < 0) {
+            printf("ERROR: network IO failed!\n");
+            exit(1);
+        }
+    }
+    
+    // quit forked VNC forwarding service
     exit(0);
 }
 
