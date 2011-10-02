@@ -539,9 +539,11 @@ static int start_server(const char* host_port) {
             } else {
                 pthread_mutex_lock(&mapping_mtx);
                 if (g_mapping.find(name) != g_mapping.end()) {
+                    printf("%s", "ERROR: mapping already exists!\n");
                     send_message(sock, "ERROR: mapping already exists!\n");
                 } else {
                     g_mapping[name] = dest;
+                    printf("%s", "INFO: mapping added\n");
                     send_message(sock, "INFO: mapping added\n");
                 }
                 pthread_mutex_unlock(&mapping_mtx);
@@ -562,8 +564,10 @@ static int start_server(const char* host_port) {
             map<string, string>::iterator it = g_mapping.find(name);
             if (it != g_mapping.end()) {
                 g_mapping.erase(it);
+                printf("%s", "INFO: mapping removed\n");
                 send_message(sock, "INFO: mapping removed\n");
             } else {
+                printf("%s", "ERROR: mapping not found!\n");
                 send_message(sock, "ERROR: mapping not found!\n");
             }
             pthread_mutex_unlock(&mapping_mtx);

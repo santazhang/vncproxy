@@ -5,7 +5,7 @@
 # make sure we're interpreted by some minimal autoconf
 AC_PREREQ(2.57)
 
-AC_INIT(vncproxy, 0.1-nightly, http://github.com/santazhang/vncproxy/issues, , http://github.com/santazhang/vncproxy)
+AC_INIT(vncproxy, 0.1, http://github.com/santazhang/vncproxy/issues, , http://github.com/santazhang/vncproxy)
 
 AC_CONFIG_MACRO_DIR([m4])
 AC_CANONICAL_HOST
