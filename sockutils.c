@@ -14,7 +14,7 @@ int tcpsvrsock(const char* host, int port) {
     if (host == NULL) {
         return -1;
     }
-    
+
     int sock;
     if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
         perror("failed to create socket");
@@ -26,7 +26,7 @@ int tcpsvrsock(const char* host, int port) {
     struct sockaddr_in sa;
     bzero(&sa, sizeof(struct sockaddr_in));
     sa.sin_family = AF_INET;
-    
+
     in_addr_t ia;
     ia = inet_addr(host);
     if (ia != INADDR_NONE) {
@@ -40,7 +40,7 @@ int tcpsvrsock(const char* host, int port) {
         }
     }
     sa.sin_port = htons(port);
-    
+
     if (bind(sock, (struct sockaddr *) &sa, sizeof(struct sockaddr_in)) < 0) {
         perror("failed to bind socket");
         close(sock);
