@@ -8,6 +8,8 @@ AC_PREREQ(2.57)
 AC_INIT(vncproxy, 0.1, http://github.com/santazhang/vncproxy/issues, , http://github.com/santazhang/vncproxy)
 
 AC_CONFIG_MACRO_DIR(m4)
+AC_CONFIG_AUX_DIR(ac)
+
 AC_CANONICAL_HOST
 AM_INIT_AUTOMAKE
 AM_CONFIG_HEADER(config.h)
