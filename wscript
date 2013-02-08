@@ -7,6 +7,7 @@ def options(opt):
 def configure(conf):
     conf.load("compiler_cxx")
     conf.check(lib="sqlite3")
+    conf.env.append_value("CXXFLAGS", ["-ggdb", "-Wall"])
 
 def build(bld):
     bld.program(source=bld.path.ant_glob(["*.c", "*.cc"]), target="vncproxy", lib=["pthread", "sqlite3"])
