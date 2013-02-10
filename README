@@ -10,7 +10,8 @@ The routing configuration is stored in a sqlite3 database, which should have
 the following schema:
 
     vncproxy(forward_key varchar(8) primary key,
-        dest_addr text not null, dest_passwd varchar(8))
+             dest_addr text not null,
+             dest_passwd varchar(8))
 
 The `forward_key` serves as a password to clients. When client connection
 provides the correct `forward_key`, vncproxy will forward this connection
@@ -43,4 +44,8 @@ Build it by:
     ./waf configure
     ./waf
 
-And you will find the binary at `build/vncproxy`.
+And you will find the binary at `build/vncproxy`. You can install by:
+
+    ./waf install
+
+The binary will be installed to `/usr/local/bin/vncproxy`.
