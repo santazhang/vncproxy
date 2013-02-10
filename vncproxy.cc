@@ -30,126 +30,127 @@ class EndPoint: public Pollable {
     EndPoint* peer_;
     string forward_key_;
 
-    // leader issues shutdown
-        bool leader_;
+    bool leader_;
+    Marshal buf_;
+    pthread_mutex_t m_;
+    bool enabled_;
 
-        // hold data sent from peer
-        Marshal buf_;
-        // guard my buf_
-        pthread_mutex_t m_;
+    static pthread_mutex_t all_tie_leaders_m;
+    static multimap<string, EndPoint*> all_tie_leaders;
 
-        bool enabled_;
+public:
+    EndPoint(PollMgr* pmgr, int fd)
+    : poll_(pmgr), fd_(fd), peer_(NULL), leader_(false), enabled_(false) {
+        Pthread_mutex_init(&m_, NULL);
+    }
 
-        // for cleanup
-        static pthread_mutex_t all_tie_leaders_m;
-        static map<string, EndPoint*> all_tie_leaders;
-    public:
-        EndPoint(PollMgr* pmgr, int fd)
-        : poll_(pmgr), fd_(fd), peer_(NULL), leader_(false), enabled_(false) {
-            Pthread_mutex_init(&m_, NULL);
+    ~EndPoint() {
+        Pthread_mutex_destroy(&m_);
+    }
+
+    void tie(EndPoint* o, const string& forward_key) {
+        this->forward_key_ = forward_key;
+        this->leader_ = true;
+        this->peer_ = o;
+        o->peer_ = this;
+
+        Pthread_mutex_lock(&all_tie_leaders_m);
+        all_tie_leaders.insert(make_pair(forward_key_, this));
+        Pthread_mutex_unlock(&all_tie_leaders_m);
+    }
+
+    void handle_read() {
+        if (!enabled_) {
+            return;
         }
-
-        ~EndPoint() {
-            Pthread_mutex_destroy(&m_);
+        Pthread_mutex_lock(&peer_->m_);
+        int cnt = peer_->buf_.read_from_fd(fd_);
+        if (cnt > 0) {
+            poll_->update_mode(peer_, Pollable::READ | Pollable::WRITE);
         }
+        Pthread_mutex_unlock(&peer_->m_);
+        //Log::debug("read (fd=%d): cnt=%d", fd_, cnt);
+    }
 
-        void tie(EndPoint* o, const string& forward_key) {
-            this->forward_key_ = forward_key;
-            this->leader_ = true;
-            this->peer_ = o;
-            o->peer_ = this;
+    void handle_write() {
+        if (!enabled_) {
+            return;
+        }
+        Pthread_mutex_lock(&m_);
+        int cnt = buf_.write_to_fd(fd_);
+        if (buf_.content_size_gt(0)) {
+            poll_->update_mode(this, Pollable::READ | Pollable::WRITE);
+        } else {
+            poll_->update_mode(this, Pollable::READ);
+        }
+        Pthread_mutex_unlock(&m_);
+        //Log::debug("write (fd=%d): cnt=%d", fd_, cnt);
+    }
+
+    int fd() {
+        return fd_;
+    }
+
+    void shutdown() {
+        close(fd_);
+        poll_->remove(this);
+        if (leader_) {
+            peer_->shutdown();
 
             Pthread_mutex_lock(&all_tie_leaders_m);
-            all_tie_leaders.insert(make_pair(forward_key_, this));
-            Pthread_mutex_unlock(&all_tie_leaders_m);
-        }
-
-        void handle_read() {
-            if (!enabled_) {
-                return;
-            }
-            Pthread_mutex_lock(&peer_->m_);
-            int cnt = peer_->buf_.read_from_fd(fd_);
-            if (cnt > 0) {
-                poll_->update_mode(peer_, Pollable::READ | Pollable::WRITE);
-            }
-            Pthread_mutex_unlock(&peer_->m_);
-            //Log::debug("read (fd=%d): cnt=%d", fd_, cnt);
-        }
-
-        void handle_write() {
-            if (!enabled_) {
-                return;
-            }
-            Pthread_mutex_lock(&m_);
-            int cnt = buf_.write_to_fd(fd_);
-            if (buf_.content_size_gt(0)) {
-                poll_->update_mode(this, Pollable::READ | Pollable::WRITE);
-            } else {
-                poll_->update_mode(this, Pollable::READ);
-            }
-            Pthread_mutex_unlock(&m_);
-            //Log::debug("write (fd=%d): cnt=%d", fd_, cnt);
-        }
-
-        int fd() {
-            return fd_;
-        }
-
-        void shutdown() {
-            close(fd_);
-            poll_->remove(this);
-            if (leader_) {
-                peer_->shutdown();
-
-                Pthread_mutex_lock(&all_tie_leaders_m);
-                all_tie_leaders.erase(forward_key_);
-                Pthread_mutex_unlock(&all_tie_leaders_m);
-            }
-            this->release();
-            //Log::info("shutdown %d", fd_);
-        }
-
-        void handle_error() {
-            if (!enabled_) {
-                return;
-            }
-            //Log::error("error: fd=%d", fd_);
-            if (leader_) {
-                shutdown();
-            } else {
-                // peer is leader
-                peer_->shutdown();
-            }
-        }
-
-        int poll_mode() {
-            return Pollable::READ | Pollable::WRITE;
-        }
-
-        void ready() {
-            enabled_ = true;
-        }
-
-        static void cleanup(const set<string>& valid_forward_keys) {
-            list<EndPoint*> outlier;
-            Pthread_mutex_lock(&all_tie_leaders_m);
-            for (map<string, EndPoint*>::iterator it = all_tie_leaders.begin(); it != all_tie_leaders.end(); ++it) {
-                if (valid_forward_keys.find(it->first) == valid_forward_keys.end()) {
-//                    Log::debug("found outlier: %s", it->first.c_str());
-                    outlier.push_back(it->second);
+            for (multimap<string, EndPoint*>::iterator it = all_tie_leaders.lower_bound(forward_key_); it != all_tie_leaders.upper_bound(forward_key_); ++it) {
+                if (it->second == this) {
+                    all_tie_leaders.erase(it);
+                    break;
                 }
             }
             Pthread_mutex_unlock(&all_tie_leaders_m);
 
-            for (list<EndPoint*>::iterator it = outlier.begin(); it != outlier.end(); ++it) {
-                (*it)->shutdown();
+            Log::info("shutdown: client_fd=%d, remote_fd=%d", fd_, peer_->fd_);
+        }
+        this->release();
+        //Log::info("shutdown %d", fd_);
+    }
+
+    void handle_error() {
+        if (!enabled_) {
+            return;
+        }
+        //Log::error("error: fd=%d", fd_);
+        if (leader_) {
+            shutdown();
+        } else {
+            // peer is leader
+            peer_->shutdown();
+        }
+    }
+
+    int poll_mode() {
+        return Pollable::READ | Pollable::WRITE;
+    }
+
+    void ready() {
+        enabled_ = true;
+    }
+
+    static void cleanup(const set<string>& valid_forward_keys) {
+        list<EndPoint*> outlier;
+        Pthread_mutex_lock(&all_tie_leaders_m);
+        for (map<string, EndPoint*>::iterator it = all_tie_leaders.begin(); it != all_tie_leaders.end(); ++it) {
+            if (valid_forward_keys.find(it->first) == valid_forward_keys.end()) {
+                outlier.push_back(it->second);
             }
         }
-    };
-    pthread_mutex_t EndPoint::all_tie_leaders_m = PTHREAD_MUTEX_INITIALIZER;
-    map<string,
-EndPoint *> EndPoint::all_tie_leaders;
+        Pthread_mutex_unlock(&all_tie_leaders_m);
+
+        for (list<EndPoint*>::iterator it = outlier.begin(); it != outlier.end(); ++it) {
+            (*it)->shutdown();
+        }
+    }
+};
+multimap<string,
+EndPoint*> EndPoint::all_tie_leaders;
+pthread_mutex_t EndPoint::all_tie_leaders_m = PTHREAD_MUTEX_INITIALIZER;
 
 // make sure that writes to fd1 will be read from fd2, and vice versa
 // both fd1 & fd2 should be nonblocking
@@ -171,7 +172,7 @@ int connect_to(const char* addr) {
     string addr_str(addr);
     int idx = addr_str.find(":");
     if (idx == string::npos) {
-        Log::error("rpc::Client: bad connect address: %s", addr);
+        Log::error("connect_to(): bad connect address: %s", addr);
         errno = EINVAL;
         return -1;
     }
@@ -186,7 +187,7 @@ int connect_to(const char* addr) {
 
     int r = getaddrinfo(host.c_str(), port.c_str(), &hints, &result);
     if (r != 0) {
-        Log::error("rpc::Client: getaddrinfo(): %s", gai_strerror(r));
+        Log::error("connect_to(): getaddrinfo(): %s", gai_strerror(r));
         return -1;
     }
 
@@ -209,7 +210,7 @@ int connect_to(const char* addr) {
 
     if (rp == NULL) {
         // failed to connect
-        Log::error("rpc::Client: connect(): %s", strerror(errno));
+        Log::error("connect_to(): connect(): %s", strerror(errno));
         return -1;
     }
 
@@ -222,7 +223,7 @@ int bind_on(const char* bind_addr, struct addrinfo **result, struct addrinfo **r
     string addr(bind_addr);
     int idx = addr.find(":");
     if (idx == string::npos) {
-        Log::error("rpc::Server: bad bind address: %s", bind_addr);
+        Log::error("bind_on(): bad bind address: %s", bind_addr);
         errno = EINVAL;
         return -1;
     }
@@ -238,7 +239,7 @@ int bind_on(const char* bind_addr, struct addrinfo **result, struct addrinfo **r
 
     int r = getaddrinfo((host == "0.0.0.0") ? NULL : host.c_str(), port.c_str(), &hints, result);
     if (r != 0) {
-        Log::error("rpc::Server: getaddrinfo(): %s", gai_strerror(r));
+        Log::error("bind_on(): getaddrinfo(): %s", gai_strerror(r));
         return -1;
     }
 
@@ -260,7 +261,7 @@ int bind_on(const char* bind_addr, struct addrinfo **result, struct addrinfo **r
 
     if (rp == NULL) {
         // failed to bind
-        Log::error("rpc::Server: bind(): %s", strerror(errno));
+        Log::error("bind_on(): bind(): %s", strerror(errno));
         freeaddrinfo(*result);
         return -1;
     }
@@ -328,17 +329,19 @@ public:
     }
 
     void run() {
-        // the sockets are in blocking mode now, and will be set to nonblocking mode
-        // when connection established
+        // ensure clnt socket is in blocking mode, so we can easily read/write full messages
+        verify(set_nonblocking(clnt_, false) == 0);
 
         // vnc hand shake, only support protocol version 3.8
         if (send(clnt_, "RFB 003.008\n", 12, MSG_WAITALL) < 0) {
+            Log::error("error communicating with client");
             close(clnt_);
             return;
         }
 
         char buf[16];
         if (recv(clnt_, buf, 12, MSG_WAITALL) < 0) {
+            Log::error("error communicating with client");
             close(clnt_);
             return;
         }
@@ -346,7 +349,7 @@ public:
         buf[12] = '\0';
         //Log::debug("client protocol: %s", buf);
         if (strcmp(buf, "RFB 003.008\n") != 0) {
-            //Log::debug("client protocol not supported");
+            Log::info("client protocol not supported: %s", buf);
             close(clnt_);
             return;
         }
@@ -355,11 +358,13 @@ public:
         buf[0] = 1; // 1 security type available
         buf[1] = 2; // use VNC auth
         if (send(clnt_, buf, 2, MSG_WAITALL) < 0) {
+            Log::error("error communicating with client");
             close(clnt_);
             return;
         }
 
         if (recv(clnt_, buf, 1, MSG_WAITALL) < 0) {
+            Log::error("error communicating with client");
             close(clnt_);
             return;
         }
@@ -372,10 +377,12 @@ public:
             challenge[i] = rand() & 0xFF;
         }
         if (send(clnt_, challenge, sizeof(challenge), MSG_WAITALL) < 0) {
+            Log::error("error communicating with client");
             close(clnt_);
             return;
         }
         if (recv(clnt_, response, sizeof(response), MSG_WAITALL) < 0) {
+            Log::error("error communicating with client");
             close(clnt_);
             return;
         }
@@ -397,6 +404,7 @@ public:
 
         if (!auth_info.matched) {
             // tell client auth failed
+            Log::info("client authentication failed");
             int32_t fail = 1;
             memcpy(buf, &fail, sizeof(fail));
             send(clnt_, buf, sizeof(fail), MSG_WAITALL);
@@ -405,17 +413,19 @@ public:
         }
         // no need to reply 'pass', leave this to remote side
 
-        Log::info("forward to: %s", auth_info.dest_addr.c_str());
+        Log::info("forward client_fd=%d to: %s", clnt_, auth_info.dest_addr.c_str());
 
         // now connect to remote vnc server
         int remote_fd = connect_to(auth_info.dest_addr.c_str());
         if (remote_fd < 0) {
+            Log::error("error communicating with remote server");
             close(clnt_);
             return;
         }
 
         // recv "RFB 003.008\n"
         if (recv(remote_fd, buf, 12, MSG_WAITALL) < 0 || memcmp(buf, "RFB 003.008\n", 12) != 0) {
+            Log::error("error communicating with remote server");
             close(remote_fd);
             close(clnt_);
             return;
@@ -423,6 +433,7 @@ public:
 
         // tell server to use protocol version 3.8
         if (send(remote_fd, "RFB 003.008\n", 12, MSG_WAITALL) < 0) {
+            Log::error("error communicating with remote server");
             close(remote_fd);
             close(clnt_);
             return;
@@ -430,6 +441,7 @@ public:
 
         // recv server auth type
         if (recv(remote_fd, buf, 1, MSG_WAITALL) < 0) {
+            Log::error("error communicating with remote server");
             close(remote_fd);
             close(clnt_);
             return;
@@ -437,6 +449,7 @@ public:
 
         int auth_types = buf[0];
         if (recv(remote_fd, buf, auth_types, MSG_WAITALL) < 0) {
+            Log::error("error communicating with remote server");
             close(remote_fd);
             close(clnt_);
             return;
@@ -455,12 +468,14 @@ public:
 
         if (support_none_auth) {
             if (send(remote_fd, "\1", 1, MSG_WAITALL) < 0) {
+                Log::error("error communicating with remote server");
                 close(remote_fd);
                 close(clnt_);
                 return;
             }
         } else if (support_vnc_auth && auth_info.has_dest_passwd) {
             if (send(remote_fd, "\2", 1, MSG_WAITALL) < 0) {
+                Log::error("error communicating with remote server");
                 close(remote_fd);
                 close(clnt_);
                 return;
@@ -468,6 +483,7 @@ public:
 
             // get challenge
             if (recv(remote_fd, challenge, sizeof(challenge), MSG_WAITALL) < 0) {
+                Log::error("error communicating with remote server");
                 close(remote_fd);
                 close(clnt_);
                 return;
@@ -489,6 +505,7 @@ public:
 
             // send response
             if (send(remote_fd, response, sizeof(response), MSG_WAITALL) < 0) {
+                Log::error("error communicating with remote server");
                 close(remote_fd);
                 close(clnt_);
                 return;
@@ -496,20 +513,24 @@ public:
 
         } else {
             // auth type not supported
+            Log::error("remote server authentication methods not supported");
             close(remote_fd);
             close(clnt_);
             return;
         }
 
-        // tie the fd up
+        Log::info("vnc forwarding established between client_fd=%d, remote_fd=%d", clnt_, remote_fd);
+
+        // tie the fd up, need nonblocking mode
         verify(set_nonblocking(clnt_, true) == 0);
         verify(set_nonblocking(remote_fd, true) == 0);
-        tie_fd(auth_info.forward_key, poll_, remote_fd, clnt_);
+        tie_fd(auth_info.forward_key, poll_, clnt_, remote_fd);
     }
 };
 
 void do_stop(int sig) {
     global_stop_flag = true;
+    Log::info("got signal %d, will stop", sig);
 }
 
 int collect_forward_key_callback(void* cb_args, int columns, char** values, char** column_names) {
@@ -527,10 +548,6 @@ void* cleanup_thread(void *) {
         int r = sqlite3_exec(global_db, "select forward_key from vncproxy", collect_forward_key_callback, &valid_forward_keys, &errmsg);
         Pthread_mutex_unlock(&global_m);
 
-        //for (set<string>::iterator it = valid_forward_keys.begin(); it != valid_forward_keys.end(); ++it) {
-//            Log::debug("valid key: %s", it->c_str());
-        //}
-
         if (r != SQLITE_OK) {
             Log::error("encountered sqlite error: %s", errmsg);
             sqlite3_free(errmsg);
@@ -544,9 +561,25 @@ void* cleanup_thread(void *) {
     return NULL;
 }
 
-int main(int argc, char* argv[]) {
+void print_help(char* argv[]) {
     printf("usage: %s <host:port> [proxy-db='vncproxy.sqlite3']\n", argv[0]);
+    printf("\n");
+    printf("the proxy-db should have following schema:\n");
+    printf("vncproxy(forward_key varchar(8) primary key, dest_addr text not null, dest_passwd varchar(8))\n");
+}
+
+int main(int argc, char* argv[]) {
+
+    // check for -h and --help
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
+            print_help(argv);
+            exit(0);
+        }
+    }
+
     if (argc < 2) {
+        print_help(argv);
         exit(1);
     }
 
@@ -559,10 +592,12 @@ int main(int argc, char* argv[]) {
     signal(SIGQUIT, do_stop);
 
     const char* bind_addr = argv[1];
+    Log::info("bind address: %s", bind_addr);
     char* db_fn = "vncproxy.sqlite3";
     if (argc >= 3) {
         db_fn = argv[2];
     }
+    Log::info("proxy db file: %s", db_fn);
 
     int r = sqlite3_open(db_fn, &global_db);
     if (r != 0) {
@@ -605,18 +640,20 @@ int main(int argc, char* argv[]) {
         }
 
         int clnt_socket = accept(server_sock, rp->ai_addr, &rp->ai_addrlen);
-        verify(set_nonblocking(clnt_socket, false) == 0);
         if (clnt_socket >= 0) {
+            Log::info("got new client connection, fd: %d", clnt_socket);
             thpool->run_async(new VncOperator(poll, clnt_socket));
         }
     }
 
+    Log::info("doing final cleanup");
     Pthread_join(cleanup_th, NULL);
 
     delete thpool;
     poll->release();
     freeaddrinfo(result);
     sqlite3_close(global_db);
+    Log::info("cleanup finished, quit now");
 
     return 0;
 }
