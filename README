@@ -1,0 +1,46 @@
+vncproxy
+A VNC proxy that redirects to different VNC servers on different passwords
+
+Author: Santa Zhang (santa1987@gmail.com)
+
+This utility works as a gateway proxy to multiple VNC servers, and redirects
+client connection by password to servers according to routing configuration.
+
+The routing configuration is stored in a sqlite3 database, which should have
+the following schema:
+
+    vncproxy(forward_key varchar(8) primary key,
+        dest_addr text not null, dest_passwd varchar(8))
+
+The `forward_key` serves as a password to clients. When client connection
+provides the correct `forward_key`, vncproxy will forward this connection
+to the VNC server at `dest_addr` (host:port). If the target VNC server
+requires authentication, then `dest_passwd` should be the password, otherwise
+it should be null.
+
+The sqlite3 database could be modified while vncproxy is running. Connections
+will be closed if the routing configuration is deleted. For example, consider
+the following situation:
+
+  1. new record ('1', 'lab-node1:5901', 'pass123') is added to database
+  2. client A is forwarded to lab-node1:5901 according to the new record
+  3. record ('1', 'lab-node1:5901', 'pass123') is deleted from database
+  4. client A's connection will be closed by vncproxy
+
+This is done by periodically checking the database records, and close those
+connections with invalid routing record. The checking interval is 1 second.
+
+NOTE: If the record is modified but not deleted, then the connections will NOT
+      be closed. So, if we modify the record to ('1', 'lab-node2:5901', null),
+      then A's connection will NOT be closed. Modification should be done by
+      first removing the record, and then inserting a new version.
+
+Currently, only RFB protocol version 3.8 is supported. And for authentication,
+only the basic DES based VNC authentication is supported.
+
+Build it by:
+
+    ./waf configure
+    ./waf
+
+And you will find the binary at `build/vncproxy`.
