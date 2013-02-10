@@ -148,8 +148,7 @@ public:
         }
     }
 };
-multimap<string,
-EndPoint*> EndPoint::all_tie_leaders;
+multimap<string, EndPoint*> EndPoint::all_tie_leaders;
 pthread_mutex_t EndPoint::all_tie_leaders_m = PTHREAD_MUTEX_INITIALIZER;
 
 // make sure that writes to fd1 will be read from fd2, and vice versa
