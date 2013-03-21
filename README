@@ -34,7 +34,9 @@ connections with invalid routing record. The checking interval is 1 second.
 NOTE: If the record is modified but not deleted, then the connections will NOT
       be closed. So, if we modify the record to ('1', 'lab-node2:5901', null),
       then A's connection will NOT be closed. Modification should be done by
-      first removing the record, and then inserting a new version.
+      first removing the record, then inserting a new version after a while.
+      Since vncproxy checks record deletion every 1 second, wait a little
+      longer (like 5 seconds) before insertion would be a good choice.
 
 Currently, only RFB protocol version 3.8 is supported. And for authentication,
 only the basic DES based VNC authentication is supported.
